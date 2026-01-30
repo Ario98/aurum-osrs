@@ -202,14 +202,17 @@ class DatabaseClient:
         """Get the earliest timestamp in the price_history table.
 
         Returns:
-            Earliest timestamp or None if no data exists
+            The earliest timestamp or None if no data exists
         """
         query = "SELECT MIN(timestamp) FROM price_history"
 
         with self.cursor() as cur:
             cur.execute(query)
             row = cur.fetchone()
-            return row[0] if row and row[0] else None
+
+            if row and row[0]:
+                return row[0]
+            return None
 
     def get_latest_timestamp(self) -> Optional[datetime]:
         """Get the latest timestamp in the price_history table.

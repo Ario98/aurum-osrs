@@ -22,6 +22,7 @@ class Config:
     # Collection settings
     rate_limit_seconds: float
     backfill_start_date: str  # Format: YYYY-MM-DD
+    collector_mode: str  # "backfill" or "continuous"
 
     # Logging
     log_level: str
@@ -42,6 +43,7 @@ class Config:
             ),
             rate_limit_seconds=float(os.getenv("RATE_LIMIT_SECONDS", "1.0")),
             backfill_start_date=os.getenv("BACKFILL_START_DATE", "2022-01-01"),
+            collector_mode=os.getenv("COLLECTOR_MODE", "backfill"),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
         )
 

@@ -73,7 +73,7 @@ function SearchSuggestions({ query, onSelect, onClose }) {
     debounceTimeoutRef.current = setTimeout(async () => {
       try {
         const results = await searchItemsSuggestions(query);
-        setSuggestions(results);
+        setSuggestions(results.items || []);
       } catch (error) {
         console.error('Error fetching suggestions:', error);
         setSuggestions([]);
@@ -175,6 +175,7 @@ function Dashboard({ searchTerm, setSearchTerm }) {
   const [sortOrder, setSortOrder] = useState('asc');
   const [tableSearch, setTableSearch] = useState('');
   const [tableSearchLoading, setTableSearchLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
   
   // Debounce timer ref
   const searchTimeoutRef = useRef(null);
@@ -210,20 +211,27 @@ function Dashboard({ searchTerm, setSearchTerm }) {
   }, [searchTerm, page, sortBy, sortOrder, location.pathname]);
 
   // Fetch items
-  const fetchItems = useCallback(async () => {
-    setLoading(true);
-    setSearching(true);
+  const fetchItems = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setSearching(true);
+    }
     try {
       const response = await getItems(searchTerm, null, sortBy, sortOrder, page, pageSize);
       setItems(response.items);
       setTotal(response.total);
+      setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching items:', error);
-      setItems([]);
-      setTotal(0);
+      if (!silent) {
+        setItems([]);
+        setTotal(0);
+      }
     } finally {
-      setLoading(false);
-      setSearching(false);
+      if (!silent) {
+        setLoading(false);
+        setSearching(false);
+      }
     }
   }, [searchTerm, sortBy, sortOrder, page, pageSize]);
 
@@ -252,6 +260,15 @@ function Dashboard({ searchTerm, setSearchTerm }) {
   useEffect(() => {
     fetchItems();
   }, [searchTerm, sortBy, sortOrder, page, fetchItems]);
+
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchItems(true); // Silent refresh
+    }, 300000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [fetchItems]);
 
   // Handle sort click
   const handleSort = (column) => {
@@ -295,8 +312,15 @@ function Dashboard({ searchTerm, setSearchTerm }) {
         }}>
           Market Overview
         </h2>
-        <div style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
-          {searching ? 'Searching...' : `${total.toLocaleString()} items found`}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {lastUpdated && (
+            <div style={{ color: 'rgba(255, 255, 255, 0.4)', fontSize: '13px' }}>
+              Last updated: {formatRelativeTime(lastUpdated)}
+            </div>
+          )}
+          <div style={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '14px' }}>
+            {searching ? 'Searching...' : `${total.toLocaleString()} items found`}
+          </div>
         </div>
       </div>
 

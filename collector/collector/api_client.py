@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -120,7 +120,7 @@ class OSRSApiClient:
         if ts is None:
             raise ValueError("No timestamp in API response")
 
-        timestamp_dt = datetime.utcfromtimestamp(ts)
+        timestamp_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
 
         # Convert string keys to integers
         prices = {int(k): v for k, v in data.get("data", {}).items()}

@@ -22,12 +22,12 @@ services:
       timeout: 5s
       retries: 5
 
-  # Data Collector Service
-  collector:
+  # Data Collector Service - Backfill Mode (goes backwards in time)
+  collector-backfill:
     build:
       context: ./collector
       dockerfile: Dockerfile
-    container_name: osrs_collector
+    container_name: osrs_collector_backfill
     environment:
       DB_HOST: database
       DB_PORT: 5432
@@ -38,15 +38,46 @@ services:
       USER_AGENT: "osrs_trading_dashboard - private trading dashboard - @ario0446 on Discord"
       LOG_LEVEL: INFO
       RATE_LIMIT_SECONDS: 1
-      BACKFILL_START_DATE: "2022-01-01"
+      BACKFILL_START_DATE: "2025-01-01"
+      COLLECTOR_MODE: "backfill"
+      TZ: "UTC"
     depends_on:
       database:
         condition: service_healthy
     networks:
       - osrs_network
     volumes:
-      - collector_logs:/app/logs
+      - collector_backfill_logs:/app/logs
     command: python -m collector.main
+    restart: unless-stopped
+
+  # Data Collector Service - Continuous Mode (goes forwards, catches new data)
+  collector-continuous:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    container_name: osrs_collector_continuous
+    environment:
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: osrs_trading
+      DB_USER: osrs_user
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      API_BASE_URL: https://prices.runescape.wiki/api/v1/osrs
+      USER_AGENT: "osrs_trading_dashboard - private trading dashboard - @ario0446 on Discord"
+      LOG_LEVEL: INFO
+      RATE_LIMIT_SECONDS: 1
+      COLLECTOR_MODE: "continuous"
+      TZ: "UTC"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - osrs_network
+    volumes:
+      - collector_continuous_logs:/app/logs
+    command: python -m collector.main
+    restart: unless-stopped
 
   # Backend API Service
   backend:
@@ -61,6 +92,7 @@ services:
       DB_USER: osrs_user
       DB_PASSWORD: ${DB_PASSWORD:-changeme}
       LOG_LEVEL: INFO
+      TZ: "UTC"
     ports:
       - "8000:8000"
     depends_on:
@@ -82,6 +114,7 @@ services:
       - "3000:3000"
     environment:
       REACT_APP_API_URL: http://localhost:8000
+      TZ: "UTC"
     depends_on:
       - backend
     networks:
@@ -90,8 +123,10 @@ services:
 volumes:
   postgres_data:
     name: osrs_postgres_data
-  collector_logs:
-    name: osrs_collector_logs
+  collector_backfill_logs:
+    name: osrs_collector_backfill_logs
+  collector_continuous_logs:
+    name: osrs_collector_continuous_logs
   backend_logs:
     name: osrs_backend_logs
 
