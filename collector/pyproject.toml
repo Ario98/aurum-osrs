@@ -1,0 +1,25 @@
+[project]
+name = "osrs-collector"
+version = "0.1.0"
+description = "OSRS Wiki price data collector"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "psycopg2-binary>=2.9.9",
+    "python-dateutil>=2.8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.7.0",
+    "ruff>=0.0.285",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "W"]

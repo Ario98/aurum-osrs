@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  database:
+    image: postgres:16-alpine
+    container_name: osrs_database
+    environment:
+      POSTGRES_DB: osrs_trading
+      POSTGRES_USER: osrs_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - osrs_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osrs_user -d osrs_trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Data Collector Service
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    container_name: osrs_collector
+    environment:
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: osrs_trading
+      DB_USER: osrs_user
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      API_BASE_URL: https://prices.runescape.wiki/api/v1/osrs
+      USER_AGENT: "osrs_trading_dashboard - private trading dashboard - @ario0446 on Discord"
+      LOG_LEVEL: INFO
+      RATE_LIMIT_SECONDS: 1
+      BACKFILL_START_DATE: "2022-01-01"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - osrs_network
+    volumes:
+      - collector_logs:/app/logs
+    command: python -m collector.main
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: osrs_backend
+    environment:
+      DB_HOST: database
+      DB_PORT: 5432
+      DB_NAME: osrs_trading
+      DB_USER: osrs_user
+      DB_PASSWORD: ${DB_PASSWORD:-changeme}
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - osrs_network
+    volumes:
+      - backend_logs:/app/logs
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  # Dashboard Frontend
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: osrs_dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - osrs_network
+
+volumes:
+  postgres_data:
+    name: osrs_postgres_data
+  collector_logs:
+    name: osrs_collector_logs
+  backend_logs:
+    name: osrs_backend_logs
+
+networks:
+  osrs_network:
+    name: osrs_network
+    driver: bridge
