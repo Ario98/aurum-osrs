@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import PriceChart from './PriceChart';
-import { getItem, getPriceHistory } from '../services/api';
+import { getItem, getPriceHistory, getWeeklyPriceHistory } from '../services/api';
 import { format, subDays, formatDistanceToNow } from 'date-fns';
 
 function ItemDetail() {
@@ -11,6 +11,7 @@ function ItemDetail() {
   const [currentPrices, setCurrentPrices] = useState({ high: null, low: null });
   const [loading, setLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [error, setError] = useState(null);
   const [timeRange, setTimeRange] = useState('live');
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -61,25 +62,37 @@ function ItemDetail() {
     if (!item) return;
     
     try {
-      const endDate = new Date();
-      let startDate = null;
+      setLoadingHistory(true);
+      let history;
       
-      const timeRangeMap = {
-        'live': 1,
-        'week': 7,
-        'month': 30,
-        'year': 365
-      };
-      
-      if (timeRange !== 'all') {
-        const days = timeRangeMap[timeRange];
-        startDate = subDays(endDate, days);
+      // Use weekly aggregation for year and all-time views (faster, shows full history)
+      if (timeRange === 'year' || timeRange === 'all') {
+        const weeks = timeRange === 'year' ? 52 : 208; // 52 weeks for year, 4 years for all
+        history = await getWeeklyPriceHistory(id, weeks);
+      } else {
+        // Use regular price history for live, week, month views with optimized limits
+        const endDate = new Date();
+        let startDate = null;
+        let limit = 1000; // Default limit
+        
+        const timeRangeConfig = {
+          'live': { days: 1, limit: 300 },      // 1 day = ~300 5-min intervals
+          'week': { days: 7, limit: 2000 },     // 1 week = ~2000 5-min intervals  
+          'month': { days: 30, limit: 9000 }    // 1 month = ~9000 5-min intervals
+        };
+        
+        const config = timeRangeConfig[timeRange];
+        startDate = subDays(endDate, config.days);
+        limit = config.limit;
+        
+        history = await getPriceHistory(id, startDate, endDate, limit);
       }
       
-      const history = await getPriceHistory(id, startDate, endDate, 10000);
       setPriceHistory(history);
     } catch (err) {
       console.error('Error fetching price history:', err);
+    } finally {
+      setLoadingHistory(false);
     }
   }, [id, item, timeRange]);
 

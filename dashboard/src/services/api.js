@@ -57,6 +57,14 @@ export async function getPriceHistory(itemId, startDate = null, endDate = null, 
   return fetchFromAPI(`/api/prices/${itemId}?${params}`);
 }
 
+// Get weekly aggregated price history (for year/all-time views)
+export async function getWeeklyPriceHistory(itemId, weeks = 52) {
+  const params = new URLSearchParams();
+  params.append('weeks', weeks);
+  
+  return fetchFromAPI(`/api/prices/${itemId}/weekly?${params}`);
+}
+
 // Get latest prices for all items
 export async function getLatestPrices(limit = 100) {
   const params = new URLSearchParams();

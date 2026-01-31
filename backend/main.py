@@ -435,8 +435,23 @@ async def get_price_history(
             query += " AND ph.timestamp <= %s"
             params.append(end_date)
 
-        query += " ORDER BY ph.timestamp DESC LIMIT %s"
-        params.append(limit)
+        # For year/all-time views with large date ranges, use higher limit
+        # All-time view (no start_date) needs a limit to prevent loading all history
+        query += " ORDER BY ph.timestamp DESC"
+        if start_date:
+            # Check if date range > 90 days (approx 3 months), use higher limit
+            date_range_days = 365  # Default for year view
+            if end_date and start_date:
+                date_range_days = (end_date - start_date).days
+
+            effective_limit = 50000 if date_range_days > 90 else limit
+            query += " LIMIT %s"
+            params.append(effective_limit)
+        else:
+            # All-time view: limit to 10000 records for performance
+            # With 5-min intervals = ~35 days, with grouping = several months of data
+            query += " LIMIT %s"
+            params.append(10000)
 
         cursor.execute(query, params)
         rows = cursor.fetchall()
@@ -505,6 +520,66 @@ async def get_latest_prices(
     except Exception as e:
         logger.error(f"Error fetching latest prices: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch latest prices")
+
+
+@app.get("/api/prices/{item_id}/weekly", response_model=List[PricePoint])
+async def get_weekly_price_history(
+    item_id: int,
+    weeks: int = Query(52, ge=1, le=208, description="Number of weeks to return (max 4 years)"),
+):
+    """Get weekly aggregated price history for year/all-time views.
+
+    Returns weekly aggregated data with:
+    - High price: MAX of all high prices in the week
+    - Low price: MIN of all low prices in the week
+    - Volumes: SUM of all volumes in the week
+
+    This is much faster than returning all 5-minute data points.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT 
+                ph.item_id,
+                i.name,
+                DATE_TRUNC('week', ph.timestamp) as week_start,
+                MAX(ph.avg_high_price) as week_high,
+                MIN(ph.avg_low_price) as week_low,
+                SUM(ph.high_price_volume) as total_buy_volume,
+                SUM(ph.low_price_volume) as total_sell_volume
+            FROM price_history ph
+            JOIN items i ON ph.item_id = i.id
+            WHERE ph.item_id = %s
+            GROUP BY ph.item_id, i.name, DATE_TRUNC('week', ph.timestamp)
+            ORDER BY week_start DESC
+            LIMIT %s
+        """
+
+        cursor.execute(query, (item_id, weeks))
+        rows = cursor.fetchall()
+
+        prices = [
+            PricePoint(
+                item_id=row[0],
+                item_name=row[1],
+                timestamp=row[2],
+                avg_high_price=row[3],
+                avg_low_price=row[4],
+                high_price_volume=row[5],
+                low_price_volume=row[6],
+            )
+            for row in rows
+        ]
+
+        cursor.close()
+        conn.close()
+
+        return prices
+    except Exception as e:
+        logger.error(f"Error fetching weekly price history for item {item_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch weekly price history")
 
 
 if __name__ == "__main__":
