@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, ColorType, LineStyle } from 'lightweight-charts';
+import { createChart, ColorType, LineStyle, LineType } from 'lightweight-charts';
 import { AlertTriangle, Brain, Check, Copy, Flame, Info, Moon, Play, Star, TrendingUp, X, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChartPoint, ItemMetrics } from '../types';
@@ -37,6 +37,20 @@ function computeGeTax(sellPrice: number, isTaxExempt: boolean): number {
   return Math.min(Math.floor(sellPrice * 0.02), 5_000_000);
 }
 
+function formatAxisGp(val: number): string {
+  const abs = Math.abs(val);
+  if (abs < 10_000) return `${Math.round(val).toLocaleString()}`;
+  if (abs < 1_000_000) {
+    const k = val / 1_000;
+    return `${Math.abs(k) >= 100 ? k.toFixed(0) : k.toFixed(1)}k`;
+  }
+  if (abs < 1_000_000_000) {
+    const m = val / 1_000_000;
+    return `${Math.abs(m) >= 100 ? m.toFixed(1) : m.toFixed(2)}M`;
+  }
+  return `${(val / 1_000_000_000).toFixed(2)}B`;
+}
+
 export function ItemModal({
   itemId,
   cashStack,
@@ -52,6 +66,7 @@ export function ItemModal({
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [loadingChart, setLoadingChart] = useState(false);
   const [showVwapLines, setShowVwapLines] = useState(true);
+  const [trimOutliers, setTrimOutliers] = useState(true);
   const [hoverPoint, setHoverPoint] = useState<ChartPoint | null>(null);
 
   // Interactive Order Ticket state
@@ -165,17 +180,6 @@ export function ItemModal({
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.07)' },
     });
 
-    const highSeries = priceChart.addLineSeries({
-      color: '#f59e0b',
-      lineWidth: 2,
-      title: 'High',
-    });
-    const lowSeries = priceChart.addLineSeries({
-      color: '#e4e4e7',
-      lineWidth: 2,
-      title: 'Low',
-    });
-
     const highData = points
       .filter((p) => p.avgHighPrice !== null)
       .map((p) => ({ time: p.timestamp as never, value: p.avgHighPrice as number }));
@@ -183,12 +187,72 @@ export function ItemModal({
       .filter((p) => p.avgLowPrice !== null)
       .map((p) => ({ time: p.timestamp as never, value: p.avgLowPrice as number }));
 
+    // Analyze price distribution to adapt scale & line style cleanly across 50 gp runes & 1.6B rares
+    const allPrices = [...highData.map((d) => d.value), ...lowData.map((d) => d.value)].sort((a, b) => a - b);
+    const nPrices = allPrices.length;
+    const p02 = nPrices > 0 ? allPrices[Math.floor(nPrices * 0.02)] : 0;
+    const p98 = nPrices > 0 ? allPrices[Math.min(nPrices - 1, Math.ceil(nPrices * 0.98))] : 1;
+    const rawMin = nPrices > 0 ? allPrices[0] : 0;
+    const rawMax = nPrices > 0 ? allPrices[nPrices - 1] : 1;
+    const coreSpan = Math.max(0, p98 - p02);
+    const isMicroTick = coreSpan <= 20;
+
+    // Integer minMove for small-price items so axis never displays meaningless 51.25 / 51.50 decimals
+    const priceFormat = {
+      type: 'custom' as const,
+      minMove: rawMax < 10_000 ? 1 : 1,
+      formatter: formatAxisGp,
+    };
+
+    const autoscaleProvider = () => {
+      if (nPrices === 0) return null;
+      const lo = trimOutliers ? p02 : rawMin;
+      const hi = trimOutliers ? p98 : rawMax;
+      const span = hi - lo;
+      const pad = span <= 2 ? 1 : Math.max(1, span * 0.1);
+      return {
+        priceRange: {
+          minValue: Math.max(0, Math.floor(lo - pad)),
+          maxValue: Math.ceil(hi + pad),
+        },
+      };
+    };
+
+    const lineType = isMicroTick ? LineType.WithSteps : LineType.Simple;
+
+    // High series with warm translucent amber fill underneath -> creates shaded High-to-Low spread corridor
+    const highSeries = priceChart.addAreaSeries({
+      lineColor: '#f59e0b',
+      topColor: 'rgba(245, 158, 11, 0.22)',
+      bottomColor: 'rgba(245, 158, 11, 0.03)',
+      lineWidth: 2,
+      lineType,
+      priceFormat,
+      autoscaleInfoProvider: autoscaleProvider,
+      title: 'High',
+    });
+
+    // Low series masks fill below Low so the ribbon between High and Low stands out clearly
+    const lowSeries = priceChart.addAreaSeries({
+      lineColor: '#e4e4e7',
+      topColor: 'rgba(7, 7, 9, 0.84)',
+      bottomColor: 'rgba(7, 7, 9, 0.84)',
+      lineWidth: 2,
+      lineType,
+      priceFormat,
+      autoscaleInfoProvider: () => null,
+      title: 'Low',
+    });
+
     highSeries.setData(highData);
     lowSeries.setData(lowData);
 
-    // Optional VWAP reference lines so you can literally see the Dump Sniper mean-reversion baseline
+    // Optional VWAP reference lines (only drawn if within reasonable range so they never distort rune scales)
     if (showVwapLines && item) {
-      if (item.vwap_24h && item.vwap_24h > 0) {
+      const refLo = trimOutliers ? p02 : rawMin;
+      const refHi = trimOutliers ? p98 : rawMax;
+      const maxAllowedDist = Math.max(20, (refHi - refLo) * 3.0);
+      if (item.vwap_24h && item.vwap_24h > 0 && (!trimOutliers || Math.abs(item.vwap_24h - refHi) <= maxAllowedDist)) {
         highSeries.createPriceLine({
           price: Math.round(item.vwap_24h),
           color: '#38bdf8',
@@ -198,7 +262,7 @@ export function ItemModal({
           title: '24h VWAP',
         });
       }
-      if (item.vwap_7d && item.vwap_7d > 0) {
+      if (item.vwap_7d && item.vwap_7d > 0 && (!trimOutliers || Math.abs(item.vwap_7d - refHi) <= maxAllowedDist)) {
         highSeries.createPriceLine({
           price: Math.round(item.vwap_7d),
           color: '#a78bfa',
@@ -287,7 +351,7 @@ export function ItemModal({
       priceChart.remove();
       volChart.remove();
     };
-  }, [points, showVwapLines, item?.vwap_24h, item?.vwap_7d]);
+  }, [points, showVwapLines, trimOutliers, item?.vwap_24h, item?.vwap_7d]);
 
   if (!itemId) return null;
 
@@ -455,7 +519,19 @@ export function ItemModal({
                     onChange={(e) => setShowVwapLines(e.target.checked)}
                     className="accent-sky-400"
                   />
-                  <span>VWAP lines</span>
+                  <span>VWAP</span>
+                </label>
+                <label
+                  className="ml-1 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer"
+                  title="Zoom Y-axis to the 2nd–98th percentile so single outlier spikes don't flatten small-tick items like runes"
+                >
+                  <input
+                    type="checkbox"
+                    checked={trimOutliers}
+                    onChange={(e) => setTrimOutliers(e.target.checked)}
+                    className="accent-amber-400"
+                  />
+                  <span>Trim Outliers</span>
                 </label>
               </div>
 
@@ -496,6 +572,19 @@ export function ItemModal({
                     <span className="text-zinc-500">Low </span>
                     <strong className="text-zinc-100">{formatGp(displayPt.avgLowPrice)}</strong>
                   </span>
+                  {displayPt.avgHighPrice !== null && displayPt.avgLowPrice !== null && (() => {
+                    const rawSp = displayPt.avgHighPrice - displayPt.avgLowPrice;
+                    const netSp = rawSp - computeGeTax(displayPt.avgHighPrice, Boolean(item?.is_tax_exempt));
+                    return (
+                      <span>
+                        <span className="text-zinc-500">Spread </span>
+                        <strong className="text-zinc-200">{formatSignedGp(rawSp)}</strong>
+                        <span className={`ml-1 text-[11px] font-semibold ${netSp > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          (Net {formatSignedGp(netSp)})
+                        </span>
+                      </span>
+                    );
+                  })()}
                   <span>
                     <span className="text-zinc-500">Instant-Buys </span>
                     <strong className="text-emerald-400">+{displayPt.highPriceVolume.toLocaleString()}</strong>
