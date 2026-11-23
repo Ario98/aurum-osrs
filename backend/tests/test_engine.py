@@ -261,6 +261,26 @@ def test_offer_coach_signals():
     assert res_night["coach_action"] == "HOLD"
     assert res_night["flip_mode"] == "overnight"
 
+    # LOWER_BID clears cleanly once user applies the recommended lower bid price
+    slot_dump_buy = {
+        "slot_number": 4,
+        "item_id": 99999,
+        "item_name": "Crashed Bandos item",
+        "status": "BUYING",
+        "quantity": 1,
+        "buy_price": 8_000_000,
+        "target_sell_price": 8_200_000,
+        "opened_at": now - 120,
+    }
+    res_lower = evaluate_slot(slot_dump_buy, state)
+    assert res_lower["coach_action"] == "LOWER_BID"
+    rec = res_lower["recommended_price"]
+    assert rec is not None and rec < 8_000_000
+    slot_dump_buy["buy_price"] = rec
+    res_after = evaluate_slot(slot_dump_buy, state)
+    assert res_after["coach_action"] == "HOLD"
+    assert res_after["recommended_price"] is None
+
 
 @pytest.mark.asyncio
 async def test_dink_webhook_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

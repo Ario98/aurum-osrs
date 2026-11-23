@@ -44,8 +44,8 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
             # ------------------------------------------------------------------
             if status == "BUYING":
                 gap_above_bid_pct = ((live_low - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
-                if gap_above_bid_pct > 5.0:
-                    new_bid = min(live_low, m.p25_7d or live_low)
+                new_bid = min(live_low, m.p25_7d or live_low)
+                if gap_above_bid_pct > 5.0 and new_bid > buy_price:
                     coach_action = "RELIST_BUY"
                     coach_severity = "warning"
                     recommended_price = new_bid
@@ -77,12 +77,17 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
                 drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
                 broke_7d_floor = bool(m.min_7d and live_low < int(m.min_7d * 0.97))
                 if drop_from_buy_pct <= -6.0 or (broke_7d_floor and m.ofi_1h < -0.5):
+                    rec_bail = max(live_low, live_high - 1)
                     coach_action = "BAILOUT_WARNING"
                     coach_severity = "danger"
-                    recommended_price = max(live_low, live_high - 1)
+                    recommended_price = rec_bail if target_sell > rec_bail else None
                     coach_message = (
                         f"Overnight breakdown ({drop_from_buy_pct:+.1f}% vs buy, broke 7d floor). "
-                        f"Consider bailing at {recommended_price:,} gp."
+                        + (
+                            f"Consider bailing at {rec_bail:,} gp."
+                            if target_sell > rec_bail
+                            else f"Sell already positioned at {target_sell:,} gp for exit."
+                        )
                     )
                 elif live_high >= target_sell:
                     coach_action = "HOLD"
@@ -97,11 +102,20 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
             # ACTIVE FAST-FLIP MODE: Tight bid/ask competitiveness & fast crash guard
             # ------------------------------------------------------------------
             if status == "BUYING":
+                rec_lower = max(1, live_low - max(1, int(live_low * 0.005)))
                 if m.ofi_5m < -0.65 and m.price_change_1h_pct < -2.5:
-                    coach_action = "LOWER_BID"
-                    coach_severity = "warning"
-                    recommended_price = max(1, live_low - max(1, int(live_low * 0.005)))
-                    coach_message = f"Heavy selling pressure (OFI {m.ofi_5m:+.2f}) — lower bid to {recommended_price:,} gp or cancel."
+                    if buy_price > rec_lower:
+                        coach_action = "LOWER_BID"
+                        coach_severity = "warning"
+                        recommended_price = rec_lower
+                        coach_message = f"Heavy selling pressure (OFI {m.ofi_5m:+.2f}) — lower bid to {recommended_price:,} gp or cancel."
+                    else:
+                        coach_action = "HOLD"
+                        coach_severity = "ok"
+                        coach_message = (
+                            f"Bid defensively lowered to {buy_price:,} gp (below live low {live_low:,} during "
+                            f"OFI {m.ofi_5m:+.2f} sell-off). Waiting safely or cancel."
+                        )
                 elif live_low > buy_price:
                     new_buy = live_low + 1
                     new_tax = calculate_ge_tax(live_high - 1, item_name=m.name, exempt=m.is_tax_exempt)
@@ -128,12 +142,17 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
             elif status == "SELLING":
                 drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
                 if (drop_from_buy_pct <= -3.5) or (m.ofi_5m < -0.7 and m.zscore_24h < -1.8 and live_high < target_sell):
+                    rec_bail = max(live_low, live_high - 1)
                     coach_action = "BAILOUT_WARNING"
                     coach_severity = "danger"
-                    recommended_price = max(live_low, live_high - 1)
+                    recommended_price = rec_bail if target_sell > rec_bail else None
                     coach_message = (
                         f"Dump detected ({drop_from_buy_pct:+.1f}% vs buy, OFI {m.ofi_5m:+.2f}) — "
-                        f"consider bailing at {recommended_price:,} gp to protect capital."
+                        + (
+                            f"consider bailing at {rec_bail:,} gp to protect capital."
+                            if target_sell > rec_bail
+                            else f"already priced at {target_sell:,} gp to exit."
+                        )
                     )
                 elif live_high < target_sell:
                     new_sell = live_high - 1

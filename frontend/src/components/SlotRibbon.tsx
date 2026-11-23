@@ -31,6 +31,8 @@ interface Props {
 
 export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, onOpenChart }: Props) {
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
+  const [applyingSlot, setApplyingSlot] = useState<number | null>(null);
+  const [appliedMsg, setAppliedMsg] = useState<string>('');
 
   const byNumber = new Map<number, ActiveSlot>();
   for (const s of slots) {
@@ -216,23 +218,46 @@ export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, o
 
               {/* Right: Action Buttons */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {selectedSlot.recommended_price && selectedSlot.coach_action !== 'HOLD' && (
-                  <button
-                    onClick={async () => {
-                      const p = selectedSlot.recommended_price!;
-                      if (selectedSlot.status === 'BUYING') {
-                        await onUpdateSlot(selectedSlot.slot_number, { buy_price: p });
-                      } else if (selectedSlot.status === 'BOUGHT') {
-                        await onUpdateSlot(selectedSlot.slot_number, { status: 'SELLING', target_sell_price: p });
-                      } else {
-                        await onUpdateSlot(selectedSlot.slot_number, { target_sell_price: p });
-                      }
-                    }}
-                    className="flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/25"
-                  >
-                    <RefreshCw className="h-3 w-3" /> Apply {formatGp(selectedSlot.recommended_price)}
-                  </button>
+                {appliedMsg && (
+                  <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+                    {appliedMsg}
+                  </span>
                 )}
+                {selectedSlot.recommended_price &&
+                  selectedSlot.coach_action !== 'HOLD' &&
+                  selectedSlot.recommended_price !==
+                    (selectedSlot.status === 'BUYING'
+                      ? selectedSlot.buy_price
+                      : selectedSlot.target_sell_price) && (
+                    <button
+                      disabled={applyingSlot === selectedSlot.slot_number}
+                      onClick={async () => {
+                        const p = selectedSlot.recommended_price!;
+                        setApplyingSlot(selectedSlot.slot_number);
+                        try {
+                          if (selectedSlot.status === 'BUYING') {
+                            await onUpdateSlot(selectedSlot.slot_number, { buy_price: p });
+                          } else if (selectedSlot.status === 'BOUGHT') {
+                            await onUpdateSlot(selectedSlot.slot_number, { status: 'SELLING', target_sell_price: p });
+                          } else {
+                            await onUpdateSlot(selectedSlot.slot_number, { target_sell_price: p });
+                          }
+                          navigator.clipboard?.writeText(String(p)).catch(() => {});
+                          setAppliedMsg(`Applied & copied ${formatGp(p)}`);
+                          window.setTimeout(() => setAppliedMsg(''), 2500);
+                        } finally {
+                          setApplyingSlot(null);
+                        }
+                      }}
+                      title="Update tracked offer price & copy to clipboard for RuneScape GE"
+                      className="flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/25 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${applyingSlot === selectedSlot.slot_number ? 'animate-spin' : ''}`} />
+                      {applyingSlot === selectedSlot.slot_number
+                        ? 'Applying...'
+                        : `Apply ${formatGp(selectedSlot.recommended_price)}`}
+                    </button>
+                  )}
 
                 {selectedSlot.status === 'BUYING' && (
                   <button
