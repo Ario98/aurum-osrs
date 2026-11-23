@@ -43,10 +43,12 @@ async def get_trade_calls(
     members: Optional[bool] = Query(default=None),
     min_safety: int = Query(default=45, ge=0, le=100),
     count: int = Query(default=12, ge=1, le=30),
+    ml_boost: bool = Query(default=True),
 ) -> dict[str, Any]:
     state = request.app.state.market_state
     repo = request.app.state.repo
     settings = request.app.state.settings
+    ml = getattr(request.app.state, "ml_predictor", None)
     saved = await repo.get_all_settings()
 
     eff_cash = cash_stack if cash_stack is not None else int(saved.get("cash_stack", settings.default_cash_stack))
@@ -60,6 +62,10 @@ async def get_trade_calls(
     limits = await repo.get_active_buy_limits()
     buy_limit_used = {int(l["item_id"]): int(l["quantity_bought"]) for l in limits}
 
+    ml_loaded = bool(ml and ml.loaded)
+    ml_validated = bool(ml and ml.validated)
+    eff_ml_boost = bool(ml_boost and ml_validated)
+
     calls = generate_trade_calls(
         state=state,
         cash_stack=eff_cash,
@@ -70,6 +76,8 @@ async def get_trade_calls(
         buy_limit_used=buy_limit_used,
         min_safety=min_safety,
         count=count,
+        ml_predictions=(ml.predictions if ml_loaded else None),
+        ml_boost_active=eff_ml_boost,
     )
     total_est_profit = sum(c["est_net_profit"] for c in calls[:eff_free_slots])
     total_est_gp_hr = sum(c["est_gp_per_hour"] for c in calls[:eff_free_slots])
@@ -81,6 +89,11 @@ async def get_trade_calls(
         "active_slots_count": used_slot_count,
         "mode": mode,
         "members": eff_members,
+        "ml_meta": {
+            "loaded": ml_loaded,
+            "validated": ml_validated,
+            "boost_active": eff_ml_boost,
+        },
         "summary": {
             "allocated_capital": total_capital,
             "est_batch_profit": total_est_profit,
@@ -98,10 +111,12 @@ async def get_overnight_flips(
     style: str = Query(default="balanced", pattern="^(balanced|safe|high_margin)$"),
     members: Optional[bool] = Query(default=None),
     count: int = Query(default=16, ge=1, le=40),
+    ml_boost: bool = Query(default=True),
 ) -> dict[str, Any]:
     state = request.app.state.market_state
     repo = request.app.state.repo
     settings = request.app.state.settings
+    ml = getattr(request.app.state, "ml_predictor", None)
     saved = await repo.get_all_settings()
 
     eff_cash = cash_stack if cash_stack is not None else int(saved.get("cash_stack", settings.default_cash_stack))
@@ -112,6 +127,10 @@ async def get_overnight_flips(
     limits = await repo.get_active_buy_limits()
     buy_limit_used = {int(l["item_id"]): int(l["quantity_bought"]) for l in limits}
 
+    ml_loaded = bool(ml and ml.loaded)
+    ml_validated = bool(ml and ml.validated)
+    eff_ml_boost = bool(ml_boost and ml_validated)
+
     flips = generate_overnight_flips(
         state=state,
         cash_stack=eff_cash,
@@ -121,6 +140,8 @@ async def get_overnight_flips(
         exclude_item_ids=exclude_ids,
         buy_limit_used=buy_limit_used,
         count=count,
+        ml_predictions=(ml.predictions if ml_loaded else None),
+        ml_boost_active=eff_ml_boost,
     )
     planned = flips[:slots]
     total_capital = sum(f["capital_required"] for f in planned)
@@ -132,6 +153,11 @@ async def get_overnight_flips(
         "slots": slots,
         "style": style,
         "members": eff_members,
+        "ml_meta": {
+            "loaded": ml_loaded,
+            "validated": ml_validated,
+            "boost_active": eff_ml_boost,
+        },
         "summary": {
             "allocated_capital": total_capital,
             "est_overnight_profit": total_profit,
@@ -241,15 +267,18 @@ async def market_scanner(
 @router.get("/items/{item_id}")
 async def get_item_detail(item_id: int, request: Request) -> dict[str, Any]:
     state = request.app.state.market_state
+    ml = getattr(request.app.state, "ml_predictor", None)
     m = state.metrics.get(item_id)
     if not m:
         raise HTTPException(status_code=404, detail="Item not found")
     meta = state.items.get(item_id, {})
+    pred = ml.predictions.get(item_id) if (ml and ml.loaded) else None
     return {
         **m.to_dict(),
         "examine": meta.get("examine", ""),
         "value": meta.get("value"),
         "nature_rune_price": state.nature_rune_price,
+        "ml": pred.to_dict() if pred is not None else None,
     }
 
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
+  Brain,
   Check,
   Copy,
   Layers,
@@ -27,21 +28,27 @@ const STYLES: { key: OvernightStyle; label: string; desc: string }[] = [
 interface Props {
   cashStack: number;
   members: boolean;
+  mlBoost: boolean;
+  onToggleMlBoost: () => void;
   slotsFull: boolean;
   tickVersion: number;
   slotsVersion: number;
   onStartOvernight: (flip: OvernightFlip) => Promise<void>;
   onOpenChart: (itemId: number) => void;
+  onOpenMlLab: () => void;
 }
 
 export function Overnight({
   cashStack,
   members,
+  mlBoost,
+  onToggleMlBoost,
   slotsFull,
   tickVersion,
   slotsVersion,
   onStartOvernight,
   onOpenChart,
+  onOpenMlLab,
 }: Props) {
   const [slots, setSlots] = useState(8);
   const [style, setStyle] = useState<OvernightStyle>('balanced');
@@ -58,12 +65,13 @@ export function Overnight({
         style,
         members,
         count: 16,
+        ml_boost: mlBoost,
       });
       setData(res);
     } finally {
       setLoading(false);
     }
-  }, [cashStack, slots, style, members]);
+  }, [cashStack, slots, style, members, mlBoost]);
 
   useEffect(() => {
     fetchOvernight();
@@ -142,6 +150,39 @@ export function Overnight({
         </div>
 
         <div className="flex items-center gap-2">
+          {data?.ml_meta?.loaded ? (
+            <button
+              onClick={onToggleMlBoost}
+              title={
+                data.ml_meta.validated
+                  ? 'Toggle LightGBM 12h ML ranking boost (validated out-of-sample)'
+                  : 'ML model is in advisory-only mode'
+              }
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                data.ml_meta.boost_active
+                  ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-300'
+                  : 'border-white/[0.08] bg-[#0a0a0e] text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              <span>
+                {!data.ml_meta.validated
+                  ? 'ML: Advisory'
+                  : mlBoost
+                    ? 'ML Boost: On'
+                    : 'ML Boost: Off'}
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={onOpenMlLab}
+              className="flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-[#0a0a0e] px-2.5 py-1.5 text-[11px] font-medium text-zinc-500 hover:border-white/[0.18] hover:text-zinc-300 transition"
+            >
+              <Brain className="h-3.5 w-3.5" />
+              <span>Train ML</span>
+            </button>
+          )}
+
           <div className="hidden md:flex items-center rounded-xl border border-white/[0.07] bg-[#0a0a0e] p-0.5">
             <button
               onClick={() => setView('rows')}
@@ -284,6 +325,19 @@ function OvernightRow({
                   0% TAX
                 </span>
               )}
+              {flip.ml && (
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono-num ${
+                    flip.ml.prob_12h_pct >= 62
+                      ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                      : 'border-white/[0.1] bg-white/[0.04] text-zinc-300'
+                  }`}
+                  title={`LightGBM 12h overnight win probability: ${flip.ml.prob_12h_pct}% · predicted net ROI: ${flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}${flip.ml.pred_12h_roi_pct}%`}
+                >
+                  ML {Math.round(flip.ml.prob_12h_pct)}% · {flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
+                  {flip.ml.pred_12h_roi_pct.toFixed(1)}%
+                </span>
+              )}
             </div>
             <div className="mt-0.5 text-[11px] text-zinc-500 truncate">
               Cost <span className="text-zinc-300 font-mono-num">{formatGp(flip.capital_required, true)}</span> · 8h vol{' '}
@@ -424,9 +478,15 @@ function OvernightCard({
               >
                 {flip.item_name}
               </button>
-              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-500">
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
                 <span>{flip.overnight_risk} RISK</span>
                 <span>· {flip.fill_confidence} FILL</span>
+                {flip.ml && (
+                  <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono-num font-semibold text-sky-300">
+                    ML {Math.round(flip.ml.prob_12h_pct)}% ({flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
+                    {flip.ml.pred_12h_roi_pct.toFixed(1)}%)
+                  </span>
+                )}
               </div>
             </div>
           </div>

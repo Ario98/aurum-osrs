@@ -27,6 +27,8 @@ def generate_trade_calls(
     buy_limit_used: Optional[dict[int, int]] = None,
     min_safety: int = 45,
     count: int = 8,
+    ml_predictions: Optional[dict[int, Any]] = None,
+    ml_boost_active: bool = False,
 ) -> list[dict[str, Any]]:
     """Build exact, actionable Trade Calls sized to the player's bankroll & free GE slots."""
     exclude = exclude_item_ids or set()
@@ -166,6 +168,11 @@ def generate_trade_calls(
         # Personalize ranking by real GP/hr for the player's actual cash stack!
         roi_pct = (net_unit / buy_price) * 100.0
         personalized_rank = score * 0.55 + min(45.0, (est_gp_hr / max(cash_stack * 0.02, 50_000)) * 20.0)
+        ml_pred = ml_predictions.get(m.id) if ml_predictions else None
+        if ml_boost_active and ml_pred is not None:
+            # Guardrailed ML lift (±14 pts max) when walk-forward validation passed
+            prob_ref = ml_pred.prob_12h_win if strategy_tag == "overnight" else ml_pred.prob_4h_win
+            personalized_rank += max(-14.0, min(14.0, (prob_ref - 0.5) * 28.0))
         if m.is_tax_exempt:
             reason_parts.append("0% GE tax")
         elif m.is_mega_rare_capped:
@@ -270,6 +277,7 @@ def generate_trade_calls(
                     "full_target": m.dump_full_target,
                     "target_basis": "99% of lower hourly VWAP (24h/7d)" if tag == "dump_sniper" else "Live high - 1 gp",
                 },
+                "ml": (ml_predictions[m.id].to_dict() if (ml_predictions and m.id in ml_predictions) else None),
             }
         )
 
@@ -285,6 +293,8 @@ def generate_overnight_flips(
     exclude_item_ids: Optional[set[int]] = None,
     buy_limit_used: Optional[dict[int, int]] = None,
     count: int = 16,
+    ml_predictions: Optional[dict[int, Any]] = None,
+    ml_boost_active: bool = False,
 ) -> list[dict[str, Any]]:
     """Dedicated 8-to-12h Overnight Flip recommender anchored to 7-day hourly range percentiles."""
     exclude = exclude_item_ids or set()
@@ -403,6 +413,11 @@ def generate_overnight_flips(
         else:
             total_score = profit_score + stability_score + fill_score + safety_pts + bonus
 
+        ml_pred = ml_predictions.get(m.id) if ml_predictions else None
+        if ml_boost_active and ml_pred is not None:
+            ml_delta = (ml_pred.prob_12h_win - 0.5) * 24.0 + max(-6.0, min(10.0, ml_pred.pred_12h_roi_pct * 2.0))
+            total_score += max(-16.0, min(18.0, ml_delta))
+
         reasons: list[str] = []
         if alch_protected:
             reasons.append("Alch-floor downside protection")
@@ -454,6 +469,7 @@ def generate_overnight_flips(
                     "max_7d": m.max_7d,
                     "score": round(min(99.0, total_score), 1),
                     "reason": " · ".join(reasons),
+                    "ml": ml_pred.to_dict() if ml_pred is not None else None,
                 },
             )
         )

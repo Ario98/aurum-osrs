@@ -619,6 +619,31 @@ export function ItemModal({
               </div>
             )}
 
+            {/* LightGBM Dual-Horizon ML Forecast */}
+            {item?.ml && (
+              <div className="grid grid-cols-3 gap-2.5 rounded-xl border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs tabular-nums">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">ML 4h Flip Win</div>
+                  <div className="mt-0.5 text-sm font-bold text-zinc-100">{item.ml.prob_4h_pct.toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">ML 12h Overnight</div>
+                  <div className="mt-0.5 text-sm font-bold text-zinc-100">{item.ml.prob_12h_pct.toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Pred 12h Net ROI</div>
+                  <div
+                    className={`mt-0.5 text-sm font-bold ${
+                      item.ml.pred_12h_roi_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {item.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
+                    {item.ml.pred_12h_roi_pct.toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Risk flags if present */}
             {item && item.manipulation_flags.length > 0 && (
               <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">

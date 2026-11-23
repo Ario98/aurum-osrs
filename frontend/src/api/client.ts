@@ -6,6 +6,7 @@ import type {
   ItemMetrics,
   JournalResponse,
   MarketStatus,
+  MLStatusResponse,
   OvernightResponse,
   OvernightStyle,
   ScannerPreset,
@@ -58,6 +59,7 @@ export const api = {
     members: boolean;
     min_safety?: number;
     count?: number;
+    ml_boost?: boolean;
   }) => {
     const q = new URLSearchParams();
     q.set('cash_stack', String(params.cash_stack));
@@ -66,6 +68,7 @@ export const api = {
     q.set('members', String(params.members));
     if (params.min_safety !== undefined) q.set('min_safety', String(params.min_safety));
     if (params.count !== undefined) q.set('count', String(params.count));
+    if (params.ml_boost !== undefined) q.set('ml_boost', String(params.ml_boost));
     return request<TradeCallsResponse>(`/api/market/trade-calls?${q.toString()}`);
   },
   overnightFlips: (params: {
@@ -74,6 +77,7 @@ export const api = {
     style: OvernightStyle;
     members: boolean;
     count?: number;
+    ml_boost?: boolean;
   }) => {
     const q = new URLSearchParams();
     q.set('cash_stack', String(params.cash_stack));
@@ -81,6 +85,7 @@ export const api = {
     q.set('style', params.style);
     q.set('members', String(params.members));
     if (params.count !== undefined) q.set('count', String(params.count));
+    if (params.ml_boost !== undefined) q.set('ml_boost', String(params.ml_boost));
     return request<OvernightResponse>(`/api/market/overnight?${q.toString()}`);
   },
   scanner: (params: {
@@ -212,4 +217,8 @@ export const api = {
       '/api/system/actions/backup',
       { method: 'POST' },
     ),
+
+  // Phase 5 ML & Walk-Forward Backtest
+  mlStatus: () => request<MLStatusResponse>('/api/ml/status'),
+  mlTrain: () => request<{ started: boolean; status: string; message: string }>('/api/ml/train', { method: 'POST' }),
 };

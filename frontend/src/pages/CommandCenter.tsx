@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
+  Brain,
   Check,
   Copy,
   Flame,
@@ -39,24 +40,30 @@ interface Props {
   cashStack: number;
   mode: StrategyMode;
   onChangeMode: (m: StrategyMode) => void;
+  mlBoost: boolean;
+  onToggleMlBoost: () => void;
   tradeData: TradeCallsResponse | null;
   slotsFull: boolean;
   loading: boolean;
   onRefresh: () => void;
   onStartFlip: (call: TradeCall) => Promise<void>;
   onOpenChart: (itemId: number) => void;
+  onOpenMlLab: () => void;
 }
 
 export function CommandCenter({
   cashStack,
   mode,
   onChangeMode,
+  mlBoost,
+  onToggleMlBoost,
   tradeData,
   slotsFull,
   loading,
   onRefresh,
   onStartFlip,
   onOpenChart,
+  onOpenMlLab,
 }: Props) {
   const [view, setView] = useState<'rows' | 'grid'>('rows');
 
@@ -121,6 +128,41 @@ export function CommandCenter({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Guardrailed ML Boost Toggle */}
+          {tradeData?.ml_meta?.loaded ? (
+            <button
+              onClick={onToggleMlBoost}
+              title={
+                tradeData.ml_meta.validated
+                  ? 'Toggle LightGBM ML ranking boost (validated out-of-sample)'
+                  : 'ML model is in advisory-only mode (did not clear walk-forward gate)'
+              }
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                tradeData.ml_meta.boost_active
+                  ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-300'
+                  : 'border-white/[0.08] bg-[#0a0a0e] text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              <span>
+                {!tradeData.ml_meta.validated
+                  ? 'ML: Advisory'
+                  : mlBoost
+                    ? 'ML Boost: On'
+                    : 'ML Boost: Off'}
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={onOpenMlLab}
+              title="Open ML & Backtest lab to train LightGBM models"
+              className="flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-[#0a0a0e] px-2.5 py-1.5 text-[11px] font-medium text-zinc-500 hover:border-white/[0.18] hover:text-zinc-300 transition"
+            >
+              <Brain className="h-3.5 w-3.5" />
+              <span>Train ML</span>
+            </button>
+          )}
+
           <div className="hidden md:flex items-center rounded-xl border border-white/[0.07] bg-[#0a0a0e] p-0.5">
             <button
               onClick={() => setView('rows')}
@@ -262,6 +304,20 @@ function TradeCallRow({
               {call.is_mega_rare_capped && (
                 <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
                   5M CAP
+                </span>
+              )}
+              {call.ml && (
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono-num ${
+                    call.ml.prob_4h_pct >= 65
+                      ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                      : call.ml.prob_4h_pct >= 50
+                        ? 'border-white/[0.1] bg-white/[0.04] text-zinc-300'
+                        : 'border-rose-500/25 bg-rose-500/10 text-rose-300'
+                  }`}
+                  title={`LightGBM 4h win prob: ${call.ml.prob_4h_pct}% · 12h overnight prob: ${call.ml.prob_12h_pct}% (${call.ml.pred_12h_roi_pct >= 0 ? '+' : ''}${call.ml.pred_12h_roi_pct}% est ROI)`}
+                >
+                  ML {Math.round(call.ml.prob_4h_pct)}%
                 </span>
               )}
             </div>

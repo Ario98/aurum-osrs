@@ -20,7 +20,8 @@ from app.db.repository import Repository
 from app.engine.state import MarketState
 from app.ingestion.collector import CollectorService
 from app.ingestion.wiki_client import WikiApiClient
-from app.routers import arbitrage, market, settings as settings_router, slots, system, watchlist, webhooks
+from app.ml.predictor import MLPredictor
+from app.routers import arbitrage, market, ml as ml_router, settings as settings_router, slots, system, watchlist, webhooks
 
 
 class WebSocketHub:
@@ -64,7 +65,9 @@ def create_app() -> FastAPI:
         state = MarketState()
         ws_hub = WebSocketHub()
         alerts = AlertDispatcher(cfg, repo, ws_hub.broadcast)
-        collector = CollectorService(cfg, db, repo, wiki, state, alerts, ws_hub.broadcast)
+        ml_predictor = MLPredictor(cfg.db_file.parent / "models")
+        ml_predictor.load_models()
+        collector = CollectorService(cfg, db, repo, wiki, state, alerts, ws_hub.broadcast, ml_predictor=ml_predictor)
 
         app.state.settings = cfg
         app.state.db = db
@@ -73,6 +76,7 @@ def create_app() -> FastAPI:
         app.state.market_state = state
         app.state.ws_hub = ws_hub
         app.state.alerts = alerts
+        app.state.ml_predictor = ml_predictor
         app.state.collector = collector
 
         await collector.start()
@@ -139,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(arbitrage.router)
     app.include_router(slots.router)
     app.include_router(watchlist.router)
+    app.include_router(ml_router.router)
     app.include_router(system.router)
     app.include_router(webhooks.router)
     app.include_router(settings_router.router)

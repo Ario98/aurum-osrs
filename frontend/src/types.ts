@@ -69,6 +69,19 @@ export interface TradeCall {
     full_target: number | null;
     target_basis: string;
   };
+  ml?: MLPrediction | null;
+}
+
+export interface MLPrediction {
+  prob_4h_pct: number;
+  prob_12h_pct: number;
+  pred_12h_roi_pct: number;
+}
+
+export interface MLMeta {
+  loaded: boolean;
+  validated: boolean;
+  boost_active: boolean;
 }
 
 export interface TradeCallsResponse {
@@ -77,6 +90,7 @@ export interface TradeCallsResponse {
   active_slots_count: number;
   mode: StrategyMode;
   members: boolean;
+  ml_meta?: MLMeta;
   summary: {
     allocated_capital: number;
     est_batch_profit: number;
@@ -157,6 +171,7 @@ export interface ItemMetrics {
   examine?: string;
   value?: number;
   nature_rune_price?: number;
+  ml?: MLPrediction | null;
 }
 
 export interface ActiveSlot {
@@ -363,6 +378,7 @@ export interface OvernightFlip {
   max_7d: number;
   score: number;
   reason: string;
+  ml?: MLPrediction | null;
 }
 
 export interface OvernightResponse {
@@ -370,6 +386,7 @@ export interface OvernightResponse {
   slots: number;
   style: OvernightStyle;
   members: boolean;
+  ml_meta?: MLMeta;
   summary: {
     allocated_capital: number;
     est_overnight_profit: number;
@@ -494,4 +511,68 @@ export interface SystemHealthResponse {
     active_slots_count: number;
     journal_flips_count: number;
   };
+}
+
+export interface MLBacktestFold {
+  fold: number;
+  train_rows: number;
+  test_rows: number;
+  test_start_ts: number;
+  test_end_ts: number;
+  auc_4h: number;
+  auc_12h: number;
+  ml_win_4h: number;
+  rules_win_4h: number;
+  ml_roi_4h: number;
+  rules_roi_4h: number;
+  ml_win_12h: number;
+  rules_win_12h: number;
+  ml_roi_12h: number;
+  rules_roi_12h: number;
+}
+
+export interface MLReport {
+  status: 'ready' | 'insufficient_data';
+  validated: boolean;
+  validation_reason?: string;
+  reason?: string;
+  trained_at: number;
+  elapsed_sec: number;
+  dataset_rows: number;
+  dataset_items: number;
+  lookback_days?: number;
+  embargo_hours?: number;
+  summary?: {
+    auc_4h: number;
+    rules_auc_4h: number;
+    auc_12h: number;
+    rules_auc_12h: number;
+    ml_win_4h: number;
+    rules_win_4h: number;
+    ml_roi_4h: number;
+    rules_roi_4h: number;
+    ml_win_12h: number;
+    rules_win_12h: number;
+    ml_roi_12h: number;
+    rules_roi_12h: number;
+    sim_start_gp: number;
+    sim_ml_end_gp: number;
+    sim_rules_end_gp: number;
+    sim_cycles_12h: number;
+  };
+  folds?: MLBacktestFold[];
+  equity_curve?: Array<{ ts: number; ml_gp: number; rules_gp: number }>;
+  feature_importances?: Array<{ feature: string; importance_pct: number }>;
+}
+
+export interface MLStatusResponse {
+  loaded: boolean;
+  validated: boolean;
+  predictions_count: number;
+  last_inference_ms: number;
+  last_inference_ts: number;
+  training_in_progress: boolean;
+  training_started_at: number | null;
+  last_train_error: string | null;
+  report: MLReport | null;
 }

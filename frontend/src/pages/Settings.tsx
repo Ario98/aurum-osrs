@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Activity, Bell, Check, Copy, Plug, Save, Send, SlidersHorizontal } from 'lucide-react';
+import { Activity, Bell, Brain, Check, Copy, Plug, Save, Send, SlidersHorizontal } from 'lucide-react';
 import { api } from '../api/client';
+import { MLBacktest } from '../components/MLBacktest';
 import { SystemHealth } from '../components/SystemHealth';
 import type { UserSettings } from '../types';
 
-export type SettingsSubTab = 'general' | 'health';
+export type SettingsSubTab = 'general' | 'ml' | 'health';
 
 interface Props {
   activeSubTab: SettingsSubTab;
   onChangeSubTab: (tab: SettingsSubTab) => void;
   onSettingsSaved: (s: UserSettings) => void;
+  onModelUpdated?: () => void;
 }
 
-export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved }: Props) {
+export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved, onModelUpdated }: Props) {
   const [form, setForm] = useState<UserSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
@@ -75,9 +77,9 @@ export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved }: Prop
 
   return (
     <div className="space-y-5">
-      {/* Segmented Switch: General & Integrations | System & Data Health */}
+      {/* Segmented Switch: General & Integrations | ML & Backtest | System & Data Health */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-xl border border-white/[0.08] bg-[#0c0c0f] p-1">
+        <div className="inline-flex flex-wrap rounded-xl border border-white/[0.08] bg-[#0c0c0f] p-1">
           <button
             onClick={() => onChangeSubTab('general')}
             className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
@@ -88,6 +90,17 @@ export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved }: Prop
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
             General & Integrations
+          </button>
+          <button
+            onClick={() => onChangeSubTab('ml')}
+            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+              activeSubTab === 'ml'
+                ? 'bg-zinc-100 text-zinc-950'
+                : 'text-zinc-400 hover:text-zinc-100'
+            }`}
+          >
+            <Brain className="h-3.5 w-3.5" />
+            ML & Backtest
           </button>
           <button
             onClick={() => onChangeSubTab('health')}
@@ -105,6 +118,8 @@ export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved }: Prop
 
       {activeSubTab === 'health' ? (
         <SystemHealth />
+      ) : activeSubTab === 'ml' ? (
+        <MLBacktest onModelUpdated={onModelUpdated} />
       ) : !form ? (
         <div className="p-8 text-center text-xs text-zinc-500">Loading settings...</div>
       ) : (

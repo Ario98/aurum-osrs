@@ -33,6 +33,7 @@ class CollectorService:
         state: MarketState,
         alerts: AlertDispatcher,
         broadcast_cb: Callable[[dict[str, Any]], Awaitable[None]],
+        ml_predictor: Any = None,
     ):
         self.settings = settings
         self.db = db
@@ -41,6 +42,7 @@ class CollectorService:
         self.state = state
         self.alerts = alerts
         self.broadcast_cb = broadcast_cb
+        self.ml_predictor = ml_predictor
 
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[Any]] = []
@@ -169,6 +171,8 @@ class CollectorService:
 
         # 5. Final recompute -> READY TO TRADE!
         recompute_ms = self.state.recompute_all_metrics()
+        if self.ml_predictor is not None and self.ml_predictor.loaded:
+            self.ml_predictor.refresh_predictions(self.state)
         elapsed = time.perf_counter() - t0
         self.state.bootstrap_fast_done = True
         self.state.bootstrap_progress.update(
@@ -236,6 +240,10 @@ class CollectorService:
         seasonality = await self.repo.compute_30d_hour_seasonality()
         self.state.set_seasonality_30d(seasonality)
         self.state.recompute_all_metrics()
+        if self.ml_predictor is not None:
+            if self.ml_predictor.loaded:
+                self.ml_predictor.refresh_predictions(self.state)
+            await self._maybe_schedule_daily_ml_train()
         self.state.bootstrap_bg_done = True
         self.state.bootstrap_progress["bg_done"] = True
         logger.info(
@@ -294,6 +302,8 @@ class CollectorService:
                         self.state.ingest_candle_bucket("5m", actual_ts, data)
                         self._last_5m_ts = actual_ts
                         self.state.recompute_all_metrics()
+                        if self.ml_predictor is not None and self.ml_predictor.loaded:
+                            self.ml_predictor.refresh_predictions(self.state)
                         logger.debug("Ingested 5m candle bucket %d (%d items)", actual_ts, len(data))
                 except Exception as exc:
                     logger.warning("5m poll failed for %d: %s", closed_5m, exc)
@@ -308,6 +318,8 @@ class CollectorService:
                         self.state.ingest_candle_bucket("1h", actual_ts, data)
                         self._last_1h_ts = actual_ts
                         self.state.recompute_all_metrics()
+                        if self.ml_predictor is not None and self.ml_predictor.loaded:
+                            self.ml_predictor.refresh_predictions(self.state)
                         logger.info("Ingested 1h candle bucket %d (%d items)", actual_ts, len(data))
                 except Exception as exc:
                     logger.warning("1h poll failed for %d: %s", closed_1h, exc)
@@ -337,8 +349,39 @@ class CollectorService:
                         await self.repo.upsert_items(mapping)
                         await self.repo.set_meta("last_mapping_fetch", str(now))
                         self.state.load_items(await self.repo.get_all_items())
+                await self._maybe_schedule_daily_ml_train()
             except Exception as exc:
                 logger.warning("Maintenance cycle failed: %s", exc)
+
+    async def _maybe_schedule_daily_ml_train(self) -> None:
+        """Auto-retrain LightGBM in isolated subprocess once every 24h when >=14d history exists."""
+        if self.ml_predictor is None or self.ml_predictor.training_in_progress:
+            return
+        now = int(time.time())
+        report = self.ml_predictor.report or {}
+        last_trained = int(report.get("trained_at") or 0)
+        if last_trained > 0 and (now - last_trained) < 23 * 3600:
+            return
+        # Require at least 14 days (336 hourly buckets) before auto-training
+        stats = await self.repo.get_system_db_stats(lookback_days=self.settings.bootstrap_1h_background_days)
+        if int(stats["candles_1h"]["buckets"]) < 336:
+            return
+
+        async def _notify(status: dict[str, Any]) -> None:
+            await self.broadcast_cb(
+                {
+                    "type": "ml_trained",
+                    "loaded": status.get("loaded", False),
+                    "validated": status.get("validated", False),
+                }
+            )
+
+        self.ml_predictor.start_training(
+            db_path=self.db.db_path,
+            state=self.state,
+            lookback_days=self.settings.bootstrap_1h_background_days,
+            on_complete=_notify,
+        )
 
     async def run_rollup_and_seasonality(self) -> dict[str, Any]:
         """On-demand safe action: refresh daily candles_24h rollup + 30d hour seasonality."""

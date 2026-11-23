@@ -71,6 +71,7 @@ export default function App() {
 
   const [mode, setMode] = useState<StrategyMode>('auto_mix');
   const [members, setMembers] = useState(true);
+  const [mlBoost, setMlBoost] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
   const [tradeData, setTradeData] = useState<TradeCallsResponse | null>(null);
@@ -146,14 +147,14 @@ export default function App() {
   const refreshTradeCalls = useCallback(async () => {
     setLoadingTrades(true);
     try {
-      const res = await api.tradeCalls({ cash_stack: cashStack, mode, members, count: 12 });
+      const res = await api.tradeCalls({ cash_stack: cashStack, mode, members, count: 12, ml_boost: mlBoost });
       setTradeData(res);
     } catch {
       // ignore
     } finally {
       setLoadingTrades(false);
     }
-  }, [cashStack, mode, members]);
+  }, [cashStack, mode, members, mlBoost]);
 
   const refreshAlerts = useCallback(async () => {
     try {
@@ -644,12 +645,18 @@ export default function App() {
               cashStack={cashStack}
               mode={mode}
               onChangeMode={setMode}
+              mlBoost={mlBoost}
+              onToggleMlBoost={() => setMlBoost((b) => !b)}
               tradeData={tradeData}
               slotsFull={slots.length >= 8}
               loading={loadingTrades}
               onRefresh={refreshTradeCalls}
               onStartFlip={handleStartFlip}
               onOpenChart={setSelectedItemId}
+              onOpenMlLab={() => {
+                setActiveTab('settings');
+                setSettingsSubTab('ml');
+              }}
             />
           )}
 
@@ -657,11 +664,17 @@ export default function App() {
             <Overnight
               cashStack={cashStack}
               members={members}
+              mlBoost={mlBoost}
+              onToggleMlBoost={() => setMlBoost((b) => !b)}
               slotsFull={slots.length >= 8}
               tickVersion={tickVersion}
               slotsVersion={slotsVersion}
               onStartOvernight={handleStartOvernightFlip}
               onOpenChart={setSelectedItemId}
+              onOpenMlLab={() => {
+                setActiveTab('settings');
+                setSettingsSubTab('ml');
+              }}
             />
           )}
 
@@ -691,6 +704,7 @@ export default function App() {
               activeSubTab={settingsSubTab}
               onChangeSubTab={setSettingsSubTab}
               onSettingsSaved={handleSettingsSaved}
+              onModelUpdated={() => setTickVersion((v) => v + 1)}
             />
           )}
         </main>

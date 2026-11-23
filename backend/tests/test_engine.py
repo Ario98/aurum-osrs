@@ -412,3 +412,60 @@ async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.Mon
     await alerts.close()
     await db.close()
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_ml_walk_forward_training_and_inference(tmp_path: Path):
+    import math
+    from app.db.database import Database
+    from app.db.repository import Repository
+    from app.ml.predictor import MLPredictor
+    from app.ml.train import run_training_pipeline
+
+    db_path = tmp_path / "ml_test.db"
+    models_dir = tmp_path / "models"
+    db = Database(db_path)
+    await db.connect()
+    repo = Repository(db)
+
+    # Seed 8 liquid items and 16 days (384 hours) of oscillating hourly candles
+    items = [
+        {"id": 1000 + i, "name": f"Test Item {i}", "members": True, "limit": 500, "highalch": 1000, "lowalch": 500, "icon": ""}
+        for i in range(8)
+    ]
+    await repo.upsert_items(items)
+
+    base_ts = ((int(time.time()) // 3600) - 400) * 3600
+    for h in range(384):
+        ts = base_ts + h * 3600
+        bucket: dict[int, dict[str, int]] = {}
+        for i in range(8):
+            base_p = 100_000 + i * 25_000
+            wave = int(base_p * 0.04 * math.sin(2 * math.pi * (h + i * 2) / 24.0))
+            low_p = base_p + wave
+            high_p = int(low_p * 1.032)
+            bucket[1000 + i] = {
+                "avgHighPrice": high_p,
+                "avgLowPrice": low_p,
+                "highPriceVolume": 40 + (h % 15),
+                "lowPriceVolume": 40 + ((h + 5) % 15),
+            }
+        await repo.upsert_candles("candles_1h", ts, bucket)
+    await db.close()
+
+    report = run_training_pipeline(db_path, models_dir, lookback_days=30, min_item_candles=72, min_hourly_gp_vol=10_000.0)
+    assert report["status"] == "ready"
+    assert report["dataset_rows"] >= 2000
+    assert len(report["folds"]) >= 2
+    assert len(report["equity_curve"]) >= 2
+    assert len(report["feature_importances"]) == 10
+
+    predictor = MLPredictor(models_dir)
+    assert predictor.load_models() is True
+    state = _build_sample_state()
+    inf_ms = predictor.refresh_predictions(state)
+    assert inf_ms >= 0.0
+    assert 4151 in predictor.predictions
+    pred = predictor.predictions[4151]
+    assert 0.0 < pred.prob_4h_win < 1.0
+    assert 0.0 < pred.prob_12h_win < 1.0
