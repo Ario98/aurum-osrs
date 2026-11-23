@@ -287,31 +287,87 @@ async def get_item_chart(
     item_id: int,
     request: Request,
     timestep: str = Query(default="5m", pattern="^(5m|1h|6h|24h)$"),
+    window: Optional[str] = Query(default=None, pattern="^(6h|24h|7d|30d|90d|1y)$"),
 ) -> dict[str, Any]:
-    """Fetch chart candles lazily via Wiki /timeseries (with local TTL cache) for instant 30h/15d/90d/1y zoom."""
+    """Fetch exact trading-window chart candles (6h/24h/7d/30d/90d/1y) via local SQLite + Wiki /timeseries."""
     state = request.app.state.market_state
     wiki = request.app.state.wiki_client
+    db = request.app.state.db
     settings = request.app.state.settings
 
     if item_id not in state.items:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    cache_key = (item_id, timestep)
-    cached = state.timeseries_cache.get(cache_key)
-    now = time.time()
-    ttl = 120 if timestep == "5m" else settings.timeseries_cache_ttl_seconds
+    now = int(time.time())
+    window_cfg: dict[str, tuple[str, int]] = {
+        "6h": ("5m", 6 * 3600),
+        "24h": ("5m", 24 * 3600),
+        "7d": ("1h", 7 * 86400),
+        "30d": ("1h", 30 * 86400),
+        "90d": ("6h", 90 * 86400),
+        "1y": ("24h", 365 * 86400),
+    }
 
-    if cached and (now - cached[0]) < ttl:
+    eff_step = window_cfg[window][0] if window else timestep
+    cutoff_sec = window_cfg[window][1] if window else None
+
+    # Serve 30D directly from local SQLite candles_1h (full 720 hourly candles in ~2ms!)
+    if window == "30d":
+        since_ts = now - 30 * 86400
+        async with db.conn.execute(
+            """
+            SELECT ts, avg_high, avg_low, high_vol, low_vol
+            FROM candles_1h
+            WHERE item_id = ? AND ts >= ?
+            ORDER BY ts ASC
+            """,
+            (item_id, since_ts),
+        ) as cur:
+            rows = await cur.fetchall()
+        if len(rows) >= 48:
+            local_pts = [
+                {
+                    "timestamp": int(r["ts"]),
+                    "avgHighPrice": int(r["avg_high"]) if r["avg_high"] is not None else None,
+                    "avgLowPrice": int(r["avg_low"]) if r["avg_low"] is not None else None,
+                    "highPriceVolume": int(r["high_vol"] or 0),
+                    "lowPriceVolume": int(r["low_vol"] or 0),
+                }
+                for r in rows
+            ]
+            return {
+                "item_id": item_id,
+                "timestep": "1h",
+                "window": "30d",
+                "source": "sqlite_1h",
+                "points": local_pts,
+            }
+        # Fallback if fresh install hasn't backfilled 30d yet
+        eff_step = "6h"
+
+    cache_key = (item_id, eff_step)
+    cached = state.timeseries_cache.get(cache_key)
+    now_f = time.time()
+    ttl = 120 if eff_step == "5m" else settings.timeseries_cache_ttl_seconds
+
+    if cached and (now_f - cached[0]) < ttl:
         points = cached[1]
         source = "cache"
     else:
-        points = await wiki.fetch_timeseries(item_id=item_id, timestep=timestep)
-        state.timeseries_cache[cache_key] = (now, points)
+        points = await wiki.fetch_timeseries(item_id=item_id, timestep=eff_step)
+        state.timeseries_cache[cache_key] = (now_f, points)
         source = "wiki_timeseries"
+
+    if cutoff_sec is not None and points:
+        min_ts = now - cutoff_sec
+        sliced = [p for p in points if int(p.get("timestamp", 0)) >= min_ts]
+        if len(sliced) >= 2:
+            points = sliced
 
     return {
         "item_id": item_id,
-        "timestep": timestep,
+        "timestep": eff_step,
+        "window": window,
         "source": source,
         "points": points,
     }

@@ -25,11 +25,15 @@ interface Props {
   }) => Promise<void>;
 }
 
-const TIMEFRAMES: { key: '5m' | '1h' | '6h' | '24h'; label: string }[] = [
-  { key: '5m', label: '30H (5m)' },
-  { key: '1h', label: '15D (1h)' },
-  { key: '6h', label: '90D (6h)' },
-  { key: '24h', label: '1Y (24h)' },
+type ChartWindow = '6h' | '24h' | '7d' | '30d' | '90d' | '1y';
+
+const TIMEFRAMES: { key: ChartWindow; label: string; hint: string }[] = [
+  { key: '6h', label: '6H', hint: '6 hours (5m candles)' },
+  { key: '24h', label: '24H', hint: '24 hours (5m candles)' },
+  { key: '7d', label: '7D', hint: '7 days (1h candles)' },
+  { key: '30d', label: '30D', hint: '30 days (1h candles)' },
+  { key: '90d', label: '90D', hint: '90 days (6h candles)' },
+  { key: '1y', label: '1Y', hint: '1 year (24h candles)' },
 ];
 
 function computeGeTax(sellPrice: number, isTaxExempt: boolean): number {
@@ -62,7 +66,7 @@ export function ItemModal({
   onStartCustomFlip,
 }: Props) {
   const [item, setItem] = useState<ItemMetrics | null>(null);
-  const [timestep, setTimestep] = useState<'5m' | '1h' | '6h' | '24h'>('5m');
+  const [chartWindow, setChartWindow] = useState<ChartWindow>('24h');
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [loadingChart, setLoadingChart] = useState(false);
   const [showVwapLines, setShowVwapLines] = useState(true);
@@ -121,12 +125,17 @@ export function ItemModal({
     };
   }, [itemId, slotBudget]);
 
+  // Always reset to 24H when opening a different item
+  useEffect(() => {
+    if (itemId) setChartWindow('24h');
+  }, [itemId]);
+
   useEffect(() => {
     if (!itemId) return;
     let cancelled = false;
     setLoadingChart(true);
     api
-      .itemChart(itemId, timestep)
+      .itemChart(itemId, chartWindow)
       .then((res) => {
         if (!cancelled) {
           setPoints(res.points);
@@ -139,7 +148,7 @@ export function ItemModal({
     return () => {
       cancelled = true;
     };
-  }, [itemId, timestep]);
+  }, [itemId, chartWindow]);
 
   // Synchronized Two-Pane Chart: Top = High/Low Price + VWAP lines, Bottom = Dedicated Buy (+) vs Sell (-) Volume
   useEffect(() => {
@@ -502,9 +511,10 @@ export function ItemModal({
                 {TIMEFRAMES.map((tf) => (
                   <button
                     key={tf.key}
-                    onClick={() => setTimestep(tf.key)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                      timestep === tf.key
+                    onClick={() => setChartWindow(tf.key)}
+                    title={tf.hint}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                      chartWindow === tf.key
                         ? 'bg-zinc-100 text-zinc-950'
                         : 'border border-white/[0.06] bg-[#111115] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                     }`}
