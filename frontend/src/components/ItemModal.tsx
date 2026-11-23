@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
-import { AlertTriangle, Check, Copy, Flame, Info, Moon, Play, Star, TrendingUp, X, Zap } from 'lucide-react';
+import { AlertTriangle, Brain, Check, Copy, Flame, Info, Moon, Play, Star, TrendingUp, X, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChartPoint, ItemMetrics } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
+import { getAiVerdict } from './MLSignalBadge';
 
 interface Props {
   itemId: number | null;
@@ -619,31 +621,6 @@ export function ItemModal({
               </div>
             )}
 
-            {/* LightGBM Dual-Horizon ML Forecast */}
-            {item?.ml && (
-              <div className="grid grid-cols-3 gap-2.5 rounded-xl border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs tabular-nums">
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">ML 4h Flip Win</div>
-                  <div className="mt-0.5 text-sm font-bold text-zinc-100">{item.ml.prob_4h_pct.toFixed(1)}%</div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">ML 12h Overnight</div>
-                  <div className="mt-0.5 text-sm font-bold text-zinc-100">{item.ml.prob_12h_pct.toFixed(1)}%</div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Pred 12h Net ROI</div>
-                  <div
-                    className={`mt-0.5 text-sm font-bold ${
-                      item.ml.pred_12h_roi_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                    }`}
-                  >
-                    {item.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
-                    {item.ml.pred_12h_roi_pct.toFixed(2)}%
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Risk flags if present */}
             {item && item.manipulation_flags.length > 0 && (
               <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
@@ -655,9 +632,93 @@ export function ItemModal({
             )}
           </div>
 
-          {/* RIGHT COLUMN: Interactive Flip Calculator & Order Ticket + Key Scores */}
+          {/* RIGHT COLUMN: Prominent AI Flip Outlook + Interactive Flip Calculator & Order Ticket */}
           <div className="flex flex-col justify-between rounded-2xl border border-white/[0.08] bg-[#0f0f13] p-5">
             <div className="space-y-4">
+              {/* Prominent AI Flip Outlook Card */}
+              {item?.ml && (() => {
+                const verdict = getAiVerdict(item.ml);
+                const badgeCls =
+                  verdict.tone === 'emerald'
+                    ? 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300'
+                    : verdict.tone === 'sky'
+                      ? 'border-cyan-400/35 bg-cyan-500/15 text-cyan-200'
+                      : verdict.tone === 'amber'
+                        ? 'border-amber-400/35 bg-amber-500/15 text-amber-200'
+                        : 'border-rose-400/35 bg-rose-500/15 text-rose-300';
+                return (
+                  <div className="rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/[0.09] via-[#0c0e14] to-[#0b0b10] p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-cyan-200">
+                        <Brain className="h-4 w-4 text-cyan-400" />
+                        AI Flip Outlook
+                        <InfoTooltip
+                          title="AI Flip Outlook (30d GBDT Model)"
+                          text="Predicts the probability of clearing ≥ +0.5% net profit in 4h or ≥ +1.2% net profit in 12h after the exact 2% GE tax, using 21 historical market features."
+                          align="left"
+                        />
+                      </span>
+                      <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${badgeCls}`}>
+                        {verdict.label}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs tabular-nums">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-zinc-400">4h Flip Win</span>
+                          <span className="font-bold text-zinc-100">{item.ml.prob_4h_pct.toFixed(0)}%</span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900">
+                          <div
+                            className={`h-full rounded-full ${
+                              item.ml.prob_4h_pct >= 75
+                                ? 'bg-cyan-400'
+                                : item.ml.prob_4h_pct >= 55
+                                  ? 'bg-amber-400'
+                                  : 'bg-rose-400'
+                            }`}
+                            style={{ width: `${Math.min(100, item.ml.prob_4h_pct)}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-zinc-400">12h Overnight</span>
+                          <span className="font-bold text-zinc-100">{item.ml.prob_12h_pct.toFixed(0)}%</span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900">
+                          <div
+                            className={`h-full rounded-full ${
+                              item.ml.prob_12h_pct >= 75
+                                ? 'bg-emerald-400'
+                                : item.ml.prob_12h_pct >= 55
+                                  ? 'bg-amber-400'
+                                  : 'bg-rose-400'
+                            }`}
+                            style={{ width: `${Math.min(100, item.ml.prob_12h_pct)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-[#07080c] px-2.5 py-1.5 text-[11px]">
+                      <span className="text-zinc-400">Expected 12h Post-Tax ROI</span>
+                      <span
+                        className={`font-bold tabular-nums ${
+                          item.ml.pred_12h_roi_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                        }`}
+                      >
+                        {item.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
+                        {item.ml.pred_12h_roi_pct.toFixed(2)}%
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] leading-relaxed text-zinc-400">{verdict.summary}</p>
+                  </div>
+                );
+              })()}
+
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
                   <TrendingUp className="h-4 w-4 text-emerald-400" /> Flip Calculator & Order Ticket

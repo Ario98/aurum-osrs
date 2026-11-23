@@ -16,6 +16,8 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { InfoTooltip } from '../components/InfoTooltip';
+import { MLSignalBadge } from '../components/MLSignalBadge';
 import type { OvernightFlip, OvernightResponse, OvernightStyle } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
@@ -219,13 +221,33 @@ export function Overnight({
             : 'No overnight flips matched this filter. Try Balanced style or adjust your Cash Stack.'}
         </div>
       ) : view === 'rows' ? (
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0a0e]">
-          <div className="hidden lg:grid grid-cols-[2fr_1.7fr_1fr_1.4fr_0.9fr_auto] items-center gap-4 border-b border-white/[0.06] bg-[#08080b] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            <span>Item & Risk</span>
+        <div className="rounded-2xl border border-white/[0.08] bg-[#0a0a0e]">
+          <div className="hidden lg:grid grid-cols-[2fr_1.7fr_1fr_1.4fr_0.9fr_auto] items-center gap-4 rounded-t-2xl border-b border-white/[0.06] bg-[#08080b] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+            <span className="flex items-center gap-1">
+              Item & Risk
+              <InfoTooltip
+                title="Overnight Risk & AI 12h Signal"
+                text="LOW/MODERATE/SWING grades overnight stability. The AI 12h badge predicts win odds (≥ +1.2% net after 2% tax) and expected overnight ROI."
+                align="left"
+              />
+            </span>
             <span>Night Bid → Morning Sell</span>
             <span className="text-right">Est. Net / ROI</span>
-            <span>7d Oscillation Band</span>
-            <span className="text-right">8h Fill & Drift</span>
+            <span className="flex items-center gap-1">
+              7d Oscillation Band
+              <InfoTooltip
+                title="7-Day p25 → p75 Price Corridor"
+                text="Shows where your overnight buy bid and morning sell target sit inside the item's typical 7-day hourly trading range."
+              />
+            </span>
+            <span className="flex items-center justify-end gap-1">
+              8h Fill & Drift
+              <InfoTooltip
+                title="8h Fill Odds & 7d Drift"
+                text="Compares typical 8-hour volume against your quantity. Drift shows the 7-day trend % (steady near 0% is safest while sleeping)."
+                align="right"
+              />
+            </span>
             <span className="text-right w-[166px]">Action</span>
           </div>
           <div className="divide-y divide-white/[0.05]">
@@ -325,19 +347,7 @@ function OvernightRow({
                   0% TAX
                 </span>
               )}
-              {flip.ml && (
-                <span
-                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono-num ${
-                    flip.ml.prob_12h_pct >= 62
-                      ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
-                      : 'border-white/[0.1] bg-white/[0.04] text-zinc-300'
-                  }`}
-                  title={`LightGBM 12h overnight win probability: ${flip.ml.prob_12h_pct}% · predicted net ROI: ${flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}${flip.ml.pred_12h_roi_pct}%`}
-                >
-                  ML {Math.round(flip.ml.prob_12h_pct)}% · {flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
-                  {flip.ml.pred_12h_roi_pct.toFixed(1)}%
-                </span>
-              )}
+              {flip.ml && <MLSignalBadge ml={flip.ml} horizon="12h" />}
             </div>
             <div className="mt-0.5 text-[11px] text-zinc-500 truncate">
               Cost <span className="text-zinc-300 font-mono-num">{formatGp(flip.capital_required, true)}</span> · 8h vol{' '}
@@ -481,12 +491,7 @@ function OvernightCard({
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
                 <span>{flip.overnight_risk} RISK</span>
                 <span>· {flip.fill_confidence} FILL</span>
-                {flip.ml && (
-                  <span className="rounded bg-sky-500/10 px-1.5 py-0.5 font-mono-num font-semibold text-sky-300">
-                    ML {Math.round(flip.ml.prob_12h_pct)}% ({flip.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
-                    {flip.ml.pred_12h_roi_pct.toFixed(1)}%)
-                  </span>
-                )}
+                {flip.ml && <MLSignalBadge ml={flip.ml} horizon="12h" />}
               </div>
             </div>
           </div>

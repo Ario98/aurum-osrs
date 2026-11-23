@@ -13,6 +13,7 @@ import {
 import { api } from '../api/client';
 import type { MLStatusResponse } from '../types';
 import { formatGp } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
 
 function formatAgo(ts: number | null | undefined): string {
   if (!ts) return 'Never';
@@ -267,11 +268,21 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
             {/* 4h Active / Bounce */}
             <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c0f] p-4 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                   4h Active / Bounce (OOS)
+                  <InfoTooltip
+                    title="Out-of-Sample (OOS) 4h Test"
+                    text="Tested strictly on future days the model never saw during training. Measures how often top-8 picks cleared ≥ +0.5% net profit within 4h after 2% GE tax."
+                    align="left"
+                  />
                 </span>
-                <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300">
+                <span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-bold text-emerald-300">
                   AUC {summary.auc_4h.toFixed(3)}
+                  <InfoTooltip
+                    title="ROC-AUC Score (0.50–1.00)"
+                    text="How accurately the model ranks winning flips above losing flips. 0.50 = coin flip, 0.70+ = solid signal, 0.85+ = very strong separation."
+                    align="right"
+                  />
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs tabular-nums">
@@ -371,7 +382,14 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
             <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c0f] p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-zinc-100">Expanding Walk-Forward Folds</h3>
-                <span className="text-[11px] text-zinc-500">12h embargo gap</span>
+                <span className="flex items-center gap-1 text-[11px] text-zinc-500">
+                  12h embargo gap
+                  <InfoTooltip
+                    title="12-Hour Embargo Gap"
+                    text="Skips 12 hours between training and test windows so 12h forward outcomes from the end of training can never leak into the test set."
+                    align="right"
+                  />
+                </span>
               </div>
               <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-[#060608]">
                 <table className="w-full text-left text-xs tabular-nums">
@@ -410,6 +428,11 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
               <div className="flex items-center justify-between">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
                   <BarChart3 className="h-4 w-4 text-amber-400" /> Top Signal Drivers (Gain %)
+                  <InfoTooltip
+                    title="Feature Importance (Gain %)"
+                    text="Shows which market signals contributed the most decision power across the model's trees (e.g. spread_pct = live bid/ask spread, zscore_24h = drop vs 24h average)."
+                    align="left"
+                  />
                 </h3>
                 <span className="text-[11px] text-zinc-500">21 causal features</span>
               </div>

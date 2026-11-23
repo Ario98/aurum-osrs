@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Coins,
   FlaskConical,
+  HelpCircle,
   Lock,
   LogOut,
   Moon,
@@ -19,6 +20,7 @@ import {
 import { api } from './api/client';
 import { AlertDrawer, AlertToastStack } from './components/AlertToast';
 import { CommandPalette } from './components/CommandPalette';
+import { HelpModal } from './components/HelpModal';
 import { ItemModal } from './components/ItemModal';
 import { SlotRibbon } from './components/SlotRibbon';
 import { useMarketSocket } from './hooks/useMarketSocket';
@@ -81,6 +83,7 @@ export default function App() {
   const [toasts, setToasts] = useState<AlertItem[]>([]);
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
 
   const [tickVersion, setTickVersion] = useState(0);
@@ -592,6 +595,15 @@ export default function App() {
                 {soundEnabled ? <Volume2 className="h-3.5 w-3.5 text-emerald-400" /> : <VolumeX className="h-3.5 w-3.5" />}
               </button>
 
+              {/* Guide & Glossary Help Modal */}
+              <button
+                onClick={() => setHelpOpen(true)}
+                className="rounded-xl border border-white/[0.08] bg-[#0c0c10] p-2 text-zinc-400 hover:border-white/[0.18] hover:text-amber-300 transition"
+                title="Guide & Trading Glossary"
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+
               {/* Alerts Bell */}
               <button
                 onClick={() => setAlertDrawerOpen(true)}
@@ -730,6 +742,7 @@ export default function App() {
       </nav>
 
       {/* Modals & Overlays */}
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

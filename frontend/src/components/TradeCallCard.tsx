@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { TradeCall } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
+import { MLSignalBadge } from './MLSignalBadge';
 
 const STRATEGY_BADGES: Record<string, { label: string; cls: string }> = {
   fast_flip: { label: 'FAST FLIP', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' },
@@ -91,16 +92,7 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
                   {badge.label}
                 </span>
                 {call.ml && (
-                  <span
-                    className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold font-mono-num ${
-                      call.ml.prob_4h_pct >= 65
-                        ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
-                        : 'border-white/[0.1] bg-white/[0.04] text-zinc-300'
-                    }`}
-                    title={`LightGBM 4h win prob: ${call.ml.prob_4h_pct}% · 12h est ROI: ${call.ml.pred_12h_roi_pct >= 0 ? '+' : ''}${call.ml.pred_12h_roi_pct}%`}
-                  >
-                    ML {Math.round(call.ml.prob_4h_pct)}%
-                  </span>
+                  <MLSignalBadge ml={call.ml} horizon={call.strategy === 'overnight' ? '12h' : '4h'} />
                 )}
                 {call.is_tax_exempt && (
                   <span className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">

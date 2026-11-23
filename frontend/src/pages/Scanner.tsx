@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, Search } from 'lucide-react';
 import { api } from '../api/client';
+import { InfoTooltip } from '../components/InfoTooltip';
 import type { ItemMetrics, ScannerPreset } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
@@ -173,8 +174,8 @@ export function Scanner({ members, tickVersion, onOpenChart }: Props) {
       </div>
 
       {/* Virtualized Table */}
-      <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c0c0f]">
-        <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr_0.7fr] items-center gap-2 border-b border-white/[0.07] bg-[#08080b] px-4 py-3">
+      <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c0f]">
+        <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1fr_1fr_0.9fr_0.7fr] items-center gap-2 rounded-t-2xl border-b border-white/[0.07] bg-[#08080b] px-4 py-3">
           <SortHeader field="name" label="Item" align="left" />
           <SortHeader field="low" label="Buy (Low)" />
           <SortHeader field="high" label="Sell (High)" />
@@ -182,7 +183,14 @@ export function Scanner({ members, tickVersion, onOpenChart }: Props) {
           <SortHeader field="net_roi_pct" label="ROI %" />
           <SortHeader field="max_profit_per_limit" label="Profit / Limit" />
           <SortHeader field="vol_24h" label="24h Vol" />
-          <SortHeader field="ofi_1h" label="Flow / Z" />
+          <div className="flex items-center justify-end gap-1">
+            <SortHeader field="ofi_1h" label="Flow / Z" />
+            <InfoTooltip
+              title="Order Flow (OFI) & Z-Score (σ)"
+              text="OFI measures buy vs. sell pressure (-1 to +1). Z-Score (σ) shows how many hourly standard deviations price is below/above its 7d average."
+              align="right"
+            />
+          </div>
           <SortHeader field="overall_score" label="Score" />
         </div>
 

@@ -16,6 +16,8 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
+import { InfoTooltip } from '../components/InfoTooltip';
+import { MLSignalBadge } from '../components/MLSignalBadge';
 import { TradeCallCard } from '../components/TradeCallCard';
 import type { StrategyMode, TradeCall, TradeCallsResponse } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
@@ -215,14 +217,34 @@ export function CommandCenter({
           ))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0a0a0e]">
+        <div className="rounded-2xl border border-white/[0.08] bg-[#0a0a0e]">
           {/* Desktop Column Headers */}
-          <div className="hidden lg:grid grid-cols-[2.1fr_1.7fr_1.1fr_1.2fr_0.9fr_auto] items-center gap-4 border-b border-white/[0.06] bg-[#08080b] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            <span>Item & Signal</span>
+          <div className="hidden lg:grid grid-cols-[2.1fr_1.7fr_1.1fr_1.2fr_0.9fr_auto] items-center gap-4 rounded-t-2xl border-b border-white/[0.06] bg-[#08080b] px-5 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+            <span className="flex items-center gap-1">
+              Item & Signal
+              <InfoTooltip
+                title="Strategy & AI Signal"
+                text="Each item shows its best strategy tag (FAST, DUMP, ALCH, MARGIN) plus the AI 4h post-tax win probability badge."
+                align="left"
+              />
+            </span>
             <span>Action (Click Price to Copy)</span>
             <span className="text-right">Net Profit / ROI</span>
-            <span>1h Buy / Sell Flow</span>
-            <span className="text-right">Fill & Safety</span>
+            <span className="flex items-center gap-1">
+              1h Buy / Sell Flow
+              <InfoTooltip
+                title="1h Buy vs. Sell Flow (OFI)"
+                text="Green = instant buys (players buying at high). Red = instant sells (players dumping into low). Balanced flow fills fastest; heavy green means rising demand."
+              />
+            </span>
+            <span className="flex items-center justify-end gap-1">
+              Fill & Safety
+              <InfoTooltip
+                title="Estimated Fill & Safety Score"
+                text="Safety (0–100) grades liquidity, quote freshness, and anti-trap stability. Fill time estimates how long your exact quantity takes to buy + sell."
+                align="right"
+              />
+            </span>
             <span className="text-right w-[158px]">Trade</span>
           </div>
 
@@ -307,18 +329,7 @@ function TradeCallRow({
                 </span>
               )}
               {call.ml && (
-                <span
-                  className={`rounded border px-1.5 py-0.5 text-[9px] font-bold font-mono-num ${
-                    call.ml.prob_4h_pct >= 65
-                      ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
-                      : call.ml.prob_4h_pct >= 50
-                        ? 'border-white/[0.1] bg-white/[0.04] text-zinc-300'
-                        : 'border-rose-500/25 bg-rose-500/10 text-rose-300'
-                  }`}
-                  title={`LightGBM 4h win prob: ${call.ml.prob_4h_pct}% · 12h overnight prob: ${call.ml.prob_12h_pct}% (${call.ml.pred_12h_roi_pct >= 0 ? '+' : ''}${call.ml.pred_12h_roi_pct}% est ROI)`}
-                >
-                  ML {Math.round(call.ml.prob_4h_pct)}%
-                </span>
+                <MLSignalBadge ml={call.ml} horizon={call.strategy === 'overnight' ? '12h' : '4h'} />
               )}
             </div>
             <div className="mt-0.5 text-[11px] text-zinc-500 truncate">
