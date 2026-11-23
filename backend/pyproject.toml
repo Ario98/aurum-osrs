@@ -1,27 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "osrs-backend"
-version = "0.1.0"
-description = "OSRS Trading Dashboard Backend API"
+name = "osrs-flip-terminal-backend"
+version = "2.0.0"
+description = "Blazing-fast OSRS Grand Exchange flipping & arbitrage backend"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "psycopg2-binary>=2.9.9",
-    "pydantic>=2.5.0",
-    "python-dateutil>=2.8.2",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+    "numpy>=2.0.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "python-multipart>=0.0.12",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "black>=23.7.0",
-    "ruff>=0.0.285",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
 ]
 
-[tool.black]
-line-length = 100
-target-version = ['py311']
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-select = ["E", "F", "I", "W"]
+target-version = "py312"

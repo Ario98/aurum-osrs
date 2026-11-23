@@ -1,85 +1,36 @@
-# OSRS Trading Dashboard - Git Ignore
-
-# Environment variables
+# Environment
 .env
 .env.local
 .env.*.local
-!.env.example        # Keep the example file for reference
+!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
+.venv/
 venv/
-env/
-ENV/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
-# Logs
+# Data & Logs
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 logs/
 *.log
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
+# Frontend / Node
+node_modules/
+frontend/dist/
+backend/static/
+*.tsbuildinfo
 
-# Docker
-.dockerignore
-
-# Docker volumes (if mounted locally)
-osrs_postgres_data/
-osrs_collector_logs/
-osrs_backend_logs/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.ruff_cache/
-.opencode/
-
-# OS
+# OS / IDE
 .DS_Store
 Thumbs.db
-
-# React / Node.js
-node_modules/
-build/
-dist/
-.npm
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-
-# Temporary files
-*.tmp
-*.temp
-
-# Local development documentation
-CHECK_DATA.md
+.vscode/
+.idea/

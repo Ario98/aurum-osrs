@@ -1,222 +1,43 @@
-# OSRS Trading Dashboard
+# OSRS Flip Terminal v2
 
-A comprehensive trading dashboard for Old School RuneScape (OSRS) that tracks Grand Exchange prices using the OSRS Wiki real-time prices API.
+A blazing-fast, action-first Old School RuneScape Grand Exchange flipping & arbitrage terminal powered by the OSRS Wiki Real-Time Prices API.
 
-## Features
+## Highlights
+- **~20-Second Cold Start & Automatic Downtime Recovery:** Tiered bootstrap fetches `/mapping`, `/latest`, last 24h of `/1h`, and last 2h of `/5m` (~50 API calls total), then silently enriches 7 days of hourly history in the background.
+- **Exact 2% GE Tax Engine (May 2025+ Rules):** Deducts 2% seller tax rounded down per unit, honors the 5M GP cap at 250M+ mega-rares, 0 tax under 50 GP, and Jagex's full official tax-exempt item list.
+- **Action-First Command Center:** Enter your Cash Stack (1M–2B+) and mode (`Auto-Mix`, `Fast Flips`, `Big Margin`, `Dump Sniper`, `Alch Floor`) to get exact Buy/Sell prices, quantities, net post-tax profit, estimated fill time, and GP/hr.
+- **Proactive Offer Coach & 8-Slot GE Tracker:** Monitors open GE offers live and flags when to relist or bail out on dumps.
+- **RuneLite Dink Auto-Sync:** Paste your private webhook URL into RuneLite's official Dink plugin to auto-sync your 8 GE slots, 4-hour buy limits, and realized profit.
+- **Deterministic Arbitrage:** Live GE Item Set pack/unpack scanner, Bob Barter potion decanting (1/2/3-dose → 4-dose), and High Alchemy margins using live Nature Rune prices.
+- **Real-Time Alerts:** Live WebSocket toasts + audio chime + Discord Webhook pings.
+- **Hetzner VPS Ready:** Single lean Docker container (`< 350 MB` RAM) + Caddy auto-HTTPS + rolling SQLite backups.
 
-- **Real-time Price Tracking**: Continuously collects 5-minute price intervals from the OSRS Wiki API
-- **Historical Data**: Backfills data from January 1, 2025 onwards (configurable)
-- **Interactive Charts**: Price history visualizations with multiple time ranges
-- **Market Overview**: Latest prices and profit margins for all tradeable items
-- **Item Search**: Quick search for any OSRS item
-- **Smart Collection**: Fast catch-up mode when collector falls behind, with rate limiting
-- **Automatic Cleanup**: Removes data older than 4 years to manage storage
+## Local Quick Start
 
-## Architecture
-
-Microservices architecture with Docker:
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  Dashboard  │────▶│   Backend   │────▶│  Database   │
-│   (React)   │     │  (FastAPI)  │     │(PostgreSQL) │
-└─────────────┘     └─────────────┘     └─────────────┘
-                            │
-                            ▼
-              ┌─────────────────────────┐
-              │     Dual Collectors     │
-              │  ┌───────────────────┐  │
-              │  │  Backfill Mode    │  │
-              │  │ (Historical Data) │  │
-              │  └───────────────────┘  │
-              │  ┌───────────────────┐  │
-              │  │  Continuous Mode  │  │
-              │  │ (Real-time Data)  │  │
-              │  └───────────────────┘  │
-              └─────────────────────────┘
-                            │
-                            ▼
-                     ┌─────────────┐
-                     │ OSRS Wiki   │
-                     │    API      │
-                     └─────────────┘
-```
-
-### Services
-
-| Service | Technology | Purpose |
-|---------|-----------|---------|
-| **Database** | PostgreSQL | Stores item metadata and price history (persistent) |
-| **Collector (Backfill)** | Python | Fills historical data backwards from 2025-01-01 |
-| **Collector (Continuous)** | Python | Collects new 5-minute intervals with fast catch-up mode |
-| **Backend** | FastAPI | REST API for dashboard queries |
-| **Dashboard** | React | Dark theme UI with charts and search |
-
-## Quick Start
-
-### 1. Clone and Configure
-
+### Option A: Docker (Single Command)
 ```bash
-git clone <your-repo-url>
-cd osrs_trading_dashboard
 cp .env.example .env
-# Edit .env and set DB_PASSWORD
+docker compose up --build
 ```
+Open **http://localhost:8000**.
 
-### 2. Start Services
-
+### Option B: Local Dev (Hot Reload)
+Terminal 1 (Backend):
 ```bash
-docker-compose up -d
+cd backend
+python -m venv .venv
+.venv/Scripts/activate   # or source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload --port 8000
 ```
 
-### 3. Monitor Progress
-
+Terminal 2 (Frontend):
 ```bash
-# Check all services are running
-docker-compose ps
-
-# Watch backfill progress
-docker-compose logs -f collector-backfill
-
-# Watch continuous collection
-docker-compose logs -f collector-continuous
+cd frontend
+npm install
+npm run dev
 ```
+Open **http://localhost:5173**.
 
-### 4. Access Dashboard
-
-- **Dashboard**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
-
-**Note**: Initial backfill to January 2025 will take several hours. The continuous collector starts automatically and maintains real-time data.
-
-## API Endpoints
-
-- `GET /health` - Health check
-- `GET /api/items` - List items (with search/filter)
-- `GET /api/items/{id}` - Item details
-- `GET /api/items/search?q={query}` - Search suggestions
-- `GET /api/prices/latest` - Latest prices for all items
-- `GET /api/prices/{item_id}` - Price history for item
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_PASSWORD` | changeme | PostgreSQL password |
-| `BACKFILL_START_DATE` | 2025-01-01 | Earliest date for backfill |
-| `RATE_LIMIT_SECONDS` | 1 | API rate limit between requests |
-
-### Dual Collector Setup
-
-The system uses two separate collectors:
-
-1. **collector-backfill**: Starts first, fills historical data backwards
-   - Configurable start date (default: 2025-01-01)
-   - Runs until target date reached
-   
-2. **collector-continuous**: Starts after backfill begins, collects real-time data
-   - Automatically detects gaps >30 min and enters "fast catch-up mode"
-   - Processes rapidly until caught up, then resumes normal 90s intervals
-   - Never skips timestamps unless >15 min old
-
-## Useful Commands
-
-```bash
-# View all logs
-docker-compose logs -f
-
-# Check database
-docker exec -it osrs_database psql -U osrs_user -d osrs_trading -c "SELECT MAX(timestamp) FROM price_history;"
-
-# Check collection state
-docker exec -it osrs_database psql -U osrs_user -d osrs_trading -c "SELECT * FROM collection_state;"
-
-# Restart a service
-docker-compose restart collector-continuous
-
-# Stop everything
-docker-compose down
-
-# Clean start (removes all data!)
-docker-compose down -v
-```
-
-## Troubleshooting
-
-### Dashboard shows old data
-
-Check continuous collector is running:
-```bash
-docker-compose ps collector-continuous
-docker-compose logs collector-continuous | tail -20
-```
-
-### Large gap in recent data
-
-The continuous collector will automatically enter fast catch-up mode when >30 min behind. Monitor with:
-```bash
-docker-compose logs -f collector-continuous | grep -i "catch-up\|behind"
-```
-
-### Database connection issues
-
-1. Verify database is healthy: `docker-compose ps database`
-2. Check credentials in `.env` match
-3. Restart: `docker-compose restart database backend collector-continuous`
-
-## Project Structure
-
-```
-osrs_trading_dashboard/
-├── database/
-│   └── migrations/001_init_schema.sql
-├── collector/
-│   ├── collector/           # Python collector package
-│   │   ├── collector.py     # Main collection logic (dual mode)
-│   │   ├── api_client.py    # OSRS Wiki API client
-│   │   └── database.py      # Database operations
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── backend/
-│   ├── main.py              # FastAPI application
-│   └── Dockerfile
-├── dashboard/
-│   ├── src/
-│   │   ├── components/      # React components
-│   │   ├── App.js           # Main app with search
-│   │   └── services/api.js  # API client
-│   └── Dockerfile
-├── docker-compose.yml       # Dual collector configuration
-└── README.md
-```
-
-## Database Schema
-
-**items**: Item metadata (id, name, examine, members, alch values, limit)
-
-**price_history**: 5-minute price data (timestamp, avg_high_price, avg_low_price, volumes)
-
-**collection_state**: Tracks collection progress (last_timestamp, backfill_complete)
-
-## Development
-
-Run services individually without Docker:
-
-```bash
-# Backend
-cd backend && pip install -e . && uvicorn main:app --reload
-
-# Collector
-cd collector && pip install -e . && python -m collector.main
-
-# Dashboard
-cd dashboard && npm install && npm start
-```
-
-## License
-
-For personal use. Please respect the OSRS Wiki API terms of use.
-
-**Happy Trading!** 🎮💰
+## Hetzner VPS Production Deployment
+See [deploy/hetzner-setup.md](deploy/hetzner-setup.md) for the 5-minute Caddy auto-HTTPS setup guide.
