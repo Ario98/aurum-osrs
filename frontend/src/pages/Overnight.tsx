@@ -16,6 +16,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { api } from '../api/client';
+import { BadgePill, OVERNIGHT_RISK_META } from '../components/BadgePill';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { MLSignalBadge } from '../components/MLSignalBadge';
 import type { OvernightFlip, OvernightResponse, OvernightStyle } from '../types';
@@ -301,12 +302,7 @@ function OvernightRow({
   const buyPct = Math.max(0, Math.min(100, ((flip.buy_price - flip.min_7d) / span) * 100));
   const sellPct = Math.max(buyPct + 3, Math.min(100, ((flip.sell_price - flip.min_7d) / span) * 100));
 
-  const riskBadge =
-    flip.overnight_risk === 'LOW'
-      ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400'
-      : flip.overnight_risk === 'MODERATE'
-        ? 'border-amber-500/25 bg-amber-500/10 text-amber-300'
-        : 'border-indigo-500/30 bg-indigo-500/15 text-indigo-300';
+  const riskMeta = OVERNIGHT_RISK_META[flip.overnight_risk] || OVERNIGHT_RISK_META.MODERATE;
 
   const copyPrice = (kind: 'buy' | 'sell', val: number) => {
     navigator.clipboard.writeText(String(val));
@@ -332,34 +328,45 @@ function OvernightRow({
             )}
           </button>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => onOpenChart(flip.item_id)}
-                title="Open item chart & order ticket"
-                className="group/item inline-flex items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
-              >
-                <span className="truncate">{flip.item_name}</span>
-                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
-              </button>
-              <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${riskBadge}`}>
-                {flip.overnight_risk}
-              </span>
+            {/* Line 1: Clean dedicated Item Name */}
+            <button
+              type="button"
+              onClick={() => onOpenChart(flip.item_id)}
+              title="Open item chart & order ticket"
+              className="group/item inline-flex max-w-full items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
+            >
+              <span className="truncate">{flip.item_name}</span>
+              <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
+            </button>
+
+            {/* Line 2: Uniform Badge Strip + Compact Cost */}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <BadgePill
+                label={flip.overnight_risk}
+                cls={riskMeta.cls}
+                tooltipTitle={riskMeta.title}
+                tooltipText={riskMeta.desc}
+              />
+              {flip.ml && <MLSignalBadge ml={flip.ml} horizon="12h" />}
               {flip.alch_protected && (
-                <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
-                  ALCH FLOOR
-                </span>
+                <BadgePill
+                  label="ALCH FLOOR"
+                  cls="border-amber-500/25 bg-amber-500/10 text-amber-300"
+                  tooltipTitle="High-Alch Floor Protection"
+                  tooltipText="Bid sits within 4% of High Alchemy value minus Nature Rune cost, limiting downside risk while you sleep."
+                />
               )}
               {flip.is_tax_exempt && (
-                <span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
-                  0% TAX
-                </span>
+                <BadgePill
+                  label="0% TAX"
+                  cls="border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                  tooltipTitle="0% GE Tax Exempt"
+                  tooltipText="Official OSRS GE tax-exempt item. You keep 100% of the spread."
+                />
               )}
-              {flip.ml && <MLSignalBadge ml={flip.ml} horizon="12h" />}
-            </div>
-            <div className="mt-0.5 text-[11px] text-zinc-500 truncate">
-              Cost <span className="text-zinc-300 font-mono-num">{formatGp(flip.capital_required, true)}</span> · 8h vol{' '}
-              <span className="font-mono-num">{flip.est_8h_volume.toLocaleString()}</span>
+              <span className="text-[11px] text-zinc-500 font-mono-num">
+                · Cost <span className="text-zinc-300">{formatGp(flip.capital_required, true)}</span>
+              </span>
             </div>
           </div>
         </div>

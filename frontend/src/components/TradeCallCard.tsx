@@ -13,15 +13,8 @@ import {
 } from 'lucide-react';
 import type { TradeCall } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
+import { BadgePill, STRATEGY_META } from './BadgePill';
 import { MLSignalBadge } from './MLSignalBadge';
-
-const STRATEGY_BADGES: Record<string, { label: string; cls: string }> = {
-  fast_flip: { label: 'FAST FLIP', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' },
-  overnight: { label: 'BIG MARGIN', cls: 'bg-zinc-800 text-zinc-200 border-zinc-700' },
-  dump_sniper: { label: 'DUMP SNIPE', cls: 'bg-rose-500/10 text-rose-400 border-rose-500/25' },
-  alch_floor: { label: 'ALCH FLOOR', cls: 'bg-amber-500/10 text-amber-300 border-amber-500/25' },
-  auto_mix: { label: 'TOP CALL', cls: 'bg-zinc-800 text-zinc-200 border-zinc-700' },
-};
 
 interface Props {
   call: TradeCall;
@@ -35,7 +28,26 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
   const [starting, setStarting] = useState(false);
 
-  const badge = STRATEGY_BADGES[call.strategy] || STRATEGY_BADGES.auto_mix;
+  const meta = STRATEGY_META[call.strategy] || STRATEGY_META.auto_mix;
+  const isDump = call.strategy === 'dump_sniper' && Boolean(call.dump_details);
+  const dumpLabel = isDump ? `DUMP ${(call.dump_details?.drop_pct ?? 0).toFixed(1)}%` : meta.label;
+  const dumpDetails = isDump && call.dump_details
+    ? [
+        { label: `${call.dump_details.timeframe} Hourly Avg`, value: `${formatGp(call.dump_details.baseline_vwap)} gp` },
+        { label: 'Drop vs Avg', value: `${call.dump_details.drop_pct.toFixed(1)}%`, highlight: 'rose' as const },
+        {
+          label: 'Bounce Outlook',
+          value: call.dump_details.bounce_outlook,
+          highlight:
+            call.dump_details.bounce_outlook === 'HIGH'
+              ? ('emerald' as const)
+              : call.dump_details.bounce_outlook === 'MEDIUM'
+                ? ('amber' as const)
+                : ('rose' as const),
+        },
+        { label: 'Sell Target Basis', value: call.dump_details.target_basis },
+      ]
+    : undefined;
 
   const copyPrice = (kind: 'buy' | 'sell', val: number) => {
     navigator.clipboard.writeText(String(val));
@@ -95,21 +107,34 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
                 <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${badge.cls}`}>
-                  {badge.label}
-                </span>
+                <BadgePill
+                  label={dumpLabel}
+                  cls={meta.cls}
+                  tooltipTitle={meta.title}
+                  tooltipText={
+                    isDump && call.dump_details?.bounce_reason ? call.dump_details.bounce_reason : meta.desc
+                  }
+                  icon={isDump ? <Flame className="h-2.5 w-2.5 text-rose-400" /> : undefined}
+                  details={dumpDetails}
+                />
                 {call.ml && (
                   <MLSignalBadge ml={call.ml} horizon={call.strategy === 'overnight' ? '12h' : '4h'} />
                 )}
                 {call.is_tax_exempt && (
-                  <span className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">
-                    0% TAX
-                  </span>
+                  <BadgePill
+                    label="0% TAX"
+                    cls="border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                    tooltipTitle="0% GE Tax Exempt"
+                    tooltipText="Official OSRS GE tax-exempt item. You keep 100% of the spread."
+                  />
                 )}
                 {call.is_mega_rare_capped && (
-                  <span className="rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
-                    5M CAP
-                  </span>
+                  <BadgePill
+                    label="5M CAP"
+                    cls="border-amber-500/25 bg-amber-500/10 text-amber-300"
+                    tooltipTitle="5M GP Tax Cap"
+                    tooltipText="Items ≥ 250M gp cap GE tax at 5,000,000 gp per unit instead of a full 2%."
+                  />
                 )}
               </div>
             </div>

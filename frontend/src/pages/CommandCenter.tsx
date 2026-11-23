@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
+import { BadgePill, STRATEGY_META } from '../components/BadgePill';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { MLSignalBadge } from '../components/MLSignalBadge';
 import { TradeCallCard } from '../components/TradeCallCard';
@@ -29,14 +30,6 @@ const MODE_OPTIONS: { key: StrategyMode; label: string; desc: string }[] = [
   { key: 'dump_sniper', label: 'Dump Sniper', desc: 'Crash rebounds (hourly σ)' },
   { key: 'alch_floor', label: 'Alch Floor', desc: 'Protected near High-Alch' },
 ];
-
-const STRATEGY_PILL: Record<string, { label: string; cls: string }> = {
-  fast_flip: { label: 'FAST', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-  overnight: { label: 'MARGIN', cls: 'text-zinc-300 bg-white/[0.06] border-white/[0.1]' },
-  dump_sniper: { label: 'DUMP', cls: 'text-rose-400 bg-rose-500/10 border-rose-500/25' },
-  alch_floor: { label: 'ALCH', cls: 'text-amber-300 bg-amber-500/10 border-amber-500/20' },
-  auto_mix: { label: 'CALL', cls: 'text-zinc-300 bg-white/[0.06] border-white/[0.1]' },
-};
 
 interface Props {
   cashStack: number;
@@ -282,7 +275,37 @@ function TradeCallRow({
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
   const [starting, setStarting] = useState(false);
 
-  const pill = STRATEGY_PILL[call.strategy] || STRATEGY_PILL.auto_mix;
+  const meta = STRATEGY_META[call.strategy] || STRATEGY_META.auto_mix;
+  const isDump = call.strategy === 'dump_sniper' && Boolean(call.dump_details);
+  const dumpDrop = call.dump_details?.drop_pct ?? 0;
+  const dumpLabel = isDump ? `DUMP ${dumpDrop.toFixed(1)}%` : meta.label;
+  const dumpDetails = isDump && call.dump_details
+    ? [
+        {
+          label: `${call.dump_details.timeframe} Hourly Avg`,
+          value: `${formatGp(call.dump_details.baseline_vwap)} gp`,
+        },
+        {
+          label: 'Drop vs Avg',
+          value: `${call.dump_details.drop_pct.toFixed(1)}%`,
+          highlight: 'rose' as const,
+        },
+        {
+          label: 'Bounce Outlook',
+          value: call.dump_details.bounce_outlook,
+          highlight:
+            call.dump_details.bounce_outlook === 'HIGH'
+              ? ('emerald' as const)
+              : call.dump_details.bounce_outlook === 'MEDIUM'
+                ? ('amber' as const)
+                : ('rose' as const),
+        },
+        {
+          label: 'Sell Target Basis',
+          value: call.dump_details.target_basis,
+        },
+      ]
+    : undefined;
   const b = call.vol_1h_high ?? 0;
   const s = call.vol_1h_low ?? 0;
   const tot = b + s;
@@ -313,35 +336,51 @@ function TradeCallRow({
             )}
           </button>
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => onOpenChart(call.item_id)}
-                title="Open item chart & order ticket"
-                className="group/item inline-flex items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
-              >
-                <span className="truncate">{call.item_name}</span>
-                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
-              </button>
-              <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold tracking-wider ${pill.cls}`}>
-                {pill.label}
-              </span>
-              {call.is_tax_exempt && (
-                <span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
-                  0% TAX
-                </span>
-              )}
-              {call.is_mega_rare_capped && (
-                <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
-                  5M CAP
-                </span>
-              )}
+            {/* Line 1: Clean dedicated Item Name */}
+            <button
+              type="button"
+              onClick={() => onOpenChart(call.item_id)}
+              title="Open item chart & order ticket"
+              className="group/item inline-flex max-w-full items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
+            >
+              <span className="truncate">{call.item_name}</span>
+              <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
+            </button>
+
+            {/* Line 2: Uniform Badge Strip + Compact Cost */}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <BadgePill
+                label={dumpLabel}
+                cls={meta.cls}
+                tooltipTitle={meta.title}
+                tooltipText={
+                  isDump && call.dump_details?.bounce_reason ? call.dump_details.bounce_reason : meta.desc
+                }
+                icon={isDump ? <Flame className="h-2.5 w-2.5 text-rose-400" /> : undefined}
+                details={dumpDetails}
+              />
               {call.ml && (
                 <MLSignalBadge ml={call.ml} horizon={call.strategy === 'overnight' ? '12h' : '4h'} />
               )}
-            </div>
-            <div className="mt-0.5 text-[11px] text-zinc-500 truncate">
-              Cost <span className="text-zinc-300 font-mono-num">{formatGp(call.capital_required, true)}</span> · {call.reason}
+              {call.is_tax_exempt && (
+                <BadgePill
+                  label="0% TAX"
+                  cls="border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                  tooltipTitle="0% GE Tax Exempt"
+                  tooltipText="Official OSRS GE tax-exempt item (e.g. Bonds, Lobsters, low-tier teleports). You keep 100% of the spread."
+                />
+              )}
+              {call.is_mega_rare_capped && (
+                <BadgePill
+                  label="5M CAP"
+                  cls="border-amber-500/25 bg-amber-500/10 text-amber-300"
+                  tooltipTitle="5M GP Tax Cap (Mega-Rare)"
+                  tooltipText="Items ≥ 250M gp cap GE tax at 5,000,000 gp per unit instead of a full 2%, reducing your effective tax rate."
+                />
+              )}
+              <span className="text-[11px] text-zinc-500 font-mono-num">
+                · Cost <span className="text-zinc-300">{formatGp(call.capital_required, true)}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -451,29 +490,6 @@ function TradeCallRow({
           </button>
         </div>
       </div>
-
-      {/* Optional Dump Transparency Sub-Line */}
-      {call.strategy === 'dump_sniper' && call.dump_details && (
-        <div className="mt-2 ml-0 lg:ml-8 flex flex-wrap items-center gap-2 rounded-lg border border-rose-500/20 bg-rose-500/[0.05] px-3 py-1.5 text-[11px]">
-          <Flame className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-          <span className="text-rose-200 font-medium">
-            {call.dump_details.timeframe} Hourly Avg: <strong className="font-mono-num">{formatGp(call.dump_details.baseline_vwap)} gp</strong> ({call.dump_details.drop_pct.toFixed(1)}%)
-          </span>
-          <span className="text-zinc-500">·</span>
-          <span className="text-zinc-400">Target = {call.dump_details.target_basis}</span>
-          <span
-            className={`ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold ${
-              call.dump_details.bounce_outlook === 'HIGH'
-                ? 'bg-emerald-500/20 text-emerald-300'
-                : call.dump_details.bounce_outlook === 'MEDIUM'
-                  ? 'bg-amber-500/20 text-amber-300'
-                  : 'bg-rose-500/20 text-rose-300'
-            }`}
-          >
-            BOUNCE: {call.dump_details.bounce_outlook}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
