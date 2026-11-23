@@ -360,7 +360,7 @@ class CollectorService:
         now = int(time.time())
         report = self.ml_predictor.report or {}
         last_trained = int(report.get("trained_at") or 0)
-        if last_trained > 0 and (now - last_trained) < 23 * 3600:
+        if self.ml_predictor.loaded and last_trained > 0 and (now - last_trained) < 23 * 3600:
             return
         # Require at least 14 days (336 hourly buckets) before auto-training
         stats = await self.repo.get_system_db_stats(lookback_days=self.settings.bootstrap_1h_background_days)

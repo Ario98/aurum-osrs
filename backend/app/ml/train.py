@@ -111,10 +111,15 @@ def _eval_top_k_cycles(
     scores: np.ndarray,
     actual_roi: np.ndarray,
     actual_win: np.ndarray,
+    cap_gp: np.ndarray,
     step_hours: int,
     top_k: int = 8,
-) -> tuple[float, float, list[tuple[int, float]]]:
-    """Simulate picking top-K items every `step_hours` non-overlapping cycle; return win%, avg ROI%, per-cycle ROI."""
+    bankroll_gp: float = 25_000_000.0,
+) -> tuple[float, float, list[tuple[int, float, float]]]:
+    """Simulate picking top-K items every `step_hours` cycle with REAL 4h buy_limit + 8-slot GP caps.
+
+    Returns (win_rate_pct, capital_weighted_roi_pct, [(ts, cycle_profit_gp, deployed_gp)]).
+    """
     if len(ts) == 0:
         return 0.0, 0.0, []
     unique_ts = np.unique(ts)
@@ -127,9 +132,10 @@ def _eval_top_k_cycles(
             selected_ts.append(ti)
             last_t = ti
 
+    per_slot_cap = bankroll_gp / max(top_k, 1)
     wins: list[float] = []
-    rois: list[float] = []
-    cycle_returns: list[tuple[int, float]] = []
+    weighted_rois: list[float] = []
+    cycle_profits: list[tuple[int, float, float]] = []
 
     for t in selected_ts:
         mask = ts == t
@@ -137,16 +143,27 @@ def _eval_top_k_cycles(
         if len(idx) < 3:
             continue
         k = min(top_k, len(idx))
-        top_local = idx[np.argpartition(-scores[idx], k - 1)[:k]]
-        c_roi = float(np.mean(actual_roi[top_local]))
+        # Rank by expected GP profit (score * deployable buy_limit slot GP), matching real flipping!
+        slot_cap = np.minimum(cap_gp[idx], per_slot_cap)
+        ranked_score = scores[idx] * np.sqrt(np.maximum(slot_cap, 1.0) / per_slot_cap)
+        top_local = idx[np.argpartition(-ranked_score, k - 1)[:k]]
+
+        deployed = np.minimum(cap_gp[top_local], per_slot_cap)
+        total_deployed = float(np.sum(deployed))
+        if total_deployed <= 0:
+            continue
+        # Realistic partial-fill factor (65% of bid/ask limit actually fills cleanly in window)
+        eff_deployed = deployed * 0.65
+        profit_gp = float(np.sum(eff_deployed * (actual_roi[top_local] / 100.0)))
+        c_roi = (profit_gp / bankroll_gp) * 100.0
         c_win = float(np.mean(actual_win[top_local])) * 100.0
         wins.append(c_win)
-        rois.append(c_roi)
-        cycle_returns.append((t, c_roi))
+        weighted_rois.append(c_roi)
+        cycle_profits.append((t, profit_gp, float(np.sum(eff_deployed))))
 
-    if not rois:
+    if not weighted_rois:
         return 0.0, 0.0, []
-    return float(np.mean(wins)), float(np.mean(rois)), cycle_returns
+    return float(np.mean(wins)), float(np.mean(weighted_rois)), cycle_profits
 
 
 def run_training_pipeline(
@@ -188,6 +205,8 @@ def run_training_pipeline(
     y12_roi: np.ndarray = ds["y12_roi"]
     rule4: np.ndarray = ds["rule4"]
     rule12: np.ndarray = ds["rule12"]
+    cap4_gp: np.ndarray = ds["cap4_gp"]
+    cap12_gp: np.ndarray = ds["cap12_gp"]
 
     min_ts = int(ds["min_ts"])
     max_ts = int(ds["max_ts"])
@@ -212,6 +231,8 @@ def run_training_pipeline(
     oos_y12_roi: list[np.ndarray] = []
     oos_rule4: list[np.ndarray] = []
     oos_rule12: list[np.ndarray] = []
+    oos_cap4: list[np.ndarray] = []
+    oos_cap12: list[np.ndarray] = []
 
     for fold_idx, (start_frac, end_frac) in enumerate(fold_bounds, start=1):
         test_start = min_ts + int(span * start_frac)
@@ -239,10 +260,10 @@ def run_training_pipeline(
         ml_score_4 = p4
         ml_score_12 = p12 * np.maximum(r12, 0.1)
 
-        ml_w4, ml_roi4, _ = _eval_top_k_cycles(ts[te_mask], ml_score_4, y4_roi[te_mask], y4_win[te_mask], step_hours=4)
-        ru_w4, ru_roi4, _ = _eval_top_k_cycles(ts[te_mask], rule4[te_mask], y4_roi[te_mask], y4_win[te_mask], step_hours=4)
-        ml_w12, ml_roi12, _ = _eval_top_k_cycles(ts[te_mask], ml_score_12, y12_roi[te_mask], y12_win[te_mask], step_hours=12)
-        ru_w12, ru_roi12, _ = _eval_top_k_cycles(ts[te_mask], rule12[te_mask], y12_roi[te_mask], y12_win[te_mask], step_hours=12)
+        ml_w4, ml_roi4, _ = _eval_top_k_cycles(ts[te_mask], ml_score_4, y4_roi[te_mask], y4_win[te_mask], cap4_gp[te_mask], step_hours=4)
+        ru_w4, ru_roi4, _ = _eval_top_k_cycles(ts[te_mask], rule4[te_mask], y4_roi[te_mask], y4_win[te_mask], cap4_gp[te_mask], step_hours=4)
+        ml_w12, ml_roi12, _ = _eval_top_k_cycles(ts[te_mask], ml_score_12, y12_roi[te_mask], y12_win[te_mask], cap12_gp[te_mask], step_hours=12)
+        ru_w12, ru_roi12, _ = _eval_top_k_cycles(ts[te_mask], rule12[te_mask], y12_roi[te_mask], y12_win[te_mask], cap12_gp[te_mask], step_hours=12)
 
         folds_summary.append(
             {
@@ -274,6 +295,8 @@ def run_training_pipeline(
         oos_y12_roi.append(y12_roi[te_mask])
         oos_rule4.append(rule4[te_mask])
         oos_rule12.append(rule12[te_mask])
+        oos_cap4.append(cap4_gp[te_mask])
+        oos_cap12.append(cap12_gp[te_mask])
 
     if not oos_ts:
         report = {
@@ -298,29 +321,32 @@ def run_training_pipeline(
     all_y12_r = np.concatenate(oos_y12_roi)
     all_ru4 = np.concatenate(oos_rule4)
     all_ru12 = np.concatenate(oos_rule12)
+    all_cap4 = np.concatenate(oos_cap4)
+    all_cap12 = np.concatenate(oos_cap12)
 
     overall_auc4 = _roc_auc_score(all_y4_w, all_p4)
     overall_auc12 = _roc_auc_score(all_y12_w, all_p12)
     rules_auc4 = _roc_auc_score(all_y4_w, all_ru4)
     rules_auc12 = _roc_auc_score(all_y12_w, all_ru12)
 
-    ml_w4, ml_roi4, _ = _eval_top_k_cycles(all_ts, all_p4, all_y4_r, all_y4_w, step_hours=4)
-    ru_w4, ru_roi4, _ = _eval_top_k_cycles(all_ts, all_ru4, all_y4_r, all_y4_w, step_hours=4)
+    ml_w4, ml_roi4, _ = _eval_top_k_cycles(all_ts, all_p4, all_y4_r, all_y4_w, all_cap4, step_hours=4)
+    ru_w4, ru_roi4, _ = _eval_top_k_cycles(all_ts, all_ru4, all_y4_r, all_y4_w, all_cap4, step_hours=4)
 
     ml_s12 = all_p12 * np.maximum(all_r12, 0.1)
-    ml_w12, ml_roi12, ml_cycles_12 = _eval_top_k_cycles(all_ts, ml_s12, all_y12_r, all_y12_w, step_hours=12)
-    ru_w12, ru_roi12, ru_cycles_12 = _eval_top_k_cycles(all_ts, all_ru12, all_y12_r, all_y12_w, step_hours=12)
+    ml_w12, ml_roi12, ml_cycles_12 = _eval_top_k_cycles(all_ts, ml_s12, all_y12_r, all_y12_w, all_cap12, step_hours=12)
+    ru_w12, ru_roi12, ru_cycles_12 = _eval_top_k_cycles(all_ts, all_ru12, all_y12_r, all_y12_w, all_cap12, step_hours=12)
 
-    # Build out-of-sample 25M GP simulated overnight equity curve (60% capital deployed per 12h cycle)
+    # Realistic 25M GP simulated equity curve enforcing exact 4h GE buy limits & 8-slot caps!
     start_gp = 25_000_000.0
     ml_eq = start_gp
     ru_eq = start_gp
-    ru_map = {t: r for t, r in ru_cycles_12}
+    ru_map = {t: prof for t, prof, _ in ru_cycles_12}
     equity_curve: list[dict[str, Any]] = [{"ts": int(all_ts.min()), "ml_gp": int(start_gp), "rules_gp": int(start_gp)}]
-    for t, r_ml in ml_cycles_12:
-        r_ru = ru_map.get(t, 0.0)
-        ml_eq = max(1_000_000.0, ml_eq * (1.0 + (r_ml / 100.0) * 0.60))
-        ru_eq = max(1_000_000.0, ru_eq * (1.0 + (r_ru / 100.0) * 0.60))
+    for t, prof_ml, _ in ml_cycles_12:
+        prof_ru = ru_map.get(t, 0.0)
+        # Scale profit gently if equity changes, but cap slot deployment by real 4h buy limits
+        ml_eq = max(1_000_000.0, ml_eq + prof_ml)
+        ru_eq = max(1_000_000.0, ru_eq + prof_ru)
         equity_curve.append({"ts": int(t), "ml_gp": int(round(ml_eq)), "rules_gp": int(round(ru_eq))})
 
     # Safety Gate: ML boost only activates when out-of-sample validation clearly clears baseline

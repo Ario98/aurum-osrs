@@ -20,6 +20,8 @@ FEATURE_NAMES: list[str] = [
     "log_vol_1h",
     "log_vol_24h",
     "log_gp_vol_24h",
+    "log_limit_gp_cap",
+    "vol_to_limit_ratio",
     "ofi_1h",
     "ofi_24h",
     "vol_surge_ratio",
@@ -115,6 +117,8 @@ def build_training_dataset(
         y12_roi_chunks: list[np.ndarray] = []
         rule4_chunks: list[np.ndarray] = []
         rule12_chunks: list[np.ndarray] = []
+        cap4_chunks: list[np.ndarray] = []
+        cap12_chunks: list[np.ndarray] = []
 
         current_item: int | None = None
         buf_ts: list[int] = []
@@ -143,8 +147,13 @@ def build_training_dataset(
             mid = 0.5 * (h_valid + l_valid)
             vol_1h = hv_arr + lv_arr
 
-            # Quick liquidity filter on median item activity
+            # Quick liquidity & real 4h buy-limit GP capacity filter (skip unscalable tiny-limit junk)
+            buy_limit = int(meta["buy_limit"] or 0)
+            eff_limit = float(buy_limit if buy_limit > 0 else 5_000)
+            median_mid = float(np.median(mid))
             if float(np.median(mid * vol_1h)) < min_hourly_gp_vol:
+                return
+            if eff_limit * median_mid < 200_000.0:
                 return
 
             is_exempt = bool(meta["is_tax_exempt"])
@@ -153,6 +162,8 @@ def build_training_dataset(
             # Strictly causal features at index t (uses <= t only)
             spread_pct = np.clip((h_valid - l_valid) / np.maximum(l_valid, 1.0) * 100.0, -10.0, 40.0)
             net_margin_pct = np.clip((h_valid - l_valid - tax_now) / np.maximum(l_valid, 1.0) * 100.0, -10.0, 40.0)
+            limit_gp_cap = eff_limit * mid
+            vol_to_limit = np.clip(vol_1h / max(eff_limit, 1.0), 0.0, 50.0)
 
             vol_24h = _rolling_sum(vol_1h, 24)
             hv_24h = _rolling_sum(hv_arr, 24)
@@ -235,6 +246,12 @@ def build_training_dataset(
                 -zscore_7d[idx_range] * 8.0, -10.0, 25.0
             )
 
+            # Realistically deployable GP per 4h and 12h slot (capped by 4h GE buy_limit AND realistic volume capture!)
+            cap_qty_4h = np.minimum(eff_limit, np.maximum(1.0, vol_1h[idx_range] * 1.2))
+            cap_gp_4h = (cap_qty_4h * entry_buy).astype(np.float32)
+            cap_qty_12h = np.minimum(eff_limit, np.maximum(1.0, (vol_24h[idx_range] / 3.0) * 0.45))
+            cap_gp_12h = (cap_qty_12h * entry_buy).astype(np.float32)
+
             feats = np.column_stack(
                 [
                     spread_pct[idx_range],
@@ -243,6 +260,8 @@ def build_training_dataset(
                     np.log1p(vol_1h[idx_range]),
                     np.log1p(vol_24h[idx_range]),
                     np.log1p(vol_24h[idx_range] * mid[idx_range]),
+                    np.log1p(limit_gp_cap[idx_range]),
+                    vol_to_limit[idx_range],
                     ofi_1h[idx_range],
                     ofi_24h[idx_range],
                     vol_surge[idx_range],
@@ -270,6 +289,8 @@ def build_training_dataset(
             y12_roi_chunks.append(roi_12h.astype(np.float32))
             rule4_chunks.append(rule_4h.astype(np.float32))
             rule12_chunks.append(rule_12h.astype(np.float32))
+            cap4_chunks.append(cap_gp_4h)
+            cap12_chunks.append(cap_gp_12h)
 
         for row in cur:
             iid = int(row["item_id"])
@@ -308,6 +329,8 @@ def build_training_dataset(
         "y12_roi": np.concatenate(y12_roi_chunks),
         "rule4": np.concatenate(rule4_chunks),
         "rule12": np.concatenate(rule12_chunks),
+        "cap4_gp": np.concatenate(cap4_chunks),
+        "cap12_gp": np.concatenate(cap12_chunks),
         "rows": int(len(X)),
         "items": int(len(x_chunks)),
         "min_ts": int(ts_all.min()),
@@ -371,6 +394,10 @@ def extract_live_features(state: Any) -> tuple[list[int], np.ndarray]:
         else:
             pos_7d = 0.5
 
+        eff_limit = float(m.buy_limit if m.buy_limit > 0 else 5_000)
+        limit_gp_cap = eff_limit * mid
+        vol_to_limit = max(0.0, min(50.0, m.vol_1h / max(eff_limit, 1.0)))
+
         item_ids.append(item_id)
         rows.append(
             [
@@ -380,6 +407,8 @@ def extract_live_features(state: Any) -> tuple[list[int], np.ndarray]:
                 math.log1p(max(0, m.vol_1h)),
                 math.log1p(max(0, m.vol_24h)),
                 math.log1p(max(0.0, m.vol_24h * mid)),
+                math.log1p(max(0.0, limit_gp_cap)),
+                vol_to_limit,
                 float(m.ofi_1h),
                 float(m.ofi_24h),
                 vol_surge,

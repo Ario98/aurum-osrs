@@ -13,7 +13,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
 
-from app.ml.features import extract_live_features
+from app.ml.features import FEATURE_NAMES, extract_live_features
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,12 @@ class MLPredictor:
             import joblib
 
             bundle = joblib.load(bundle_path)
+            if bundle.get("feature_names") != FEATURE_NAMES:
+                logger.info("Saved GBDT model feature schema changed — skipping stale model until retrain.")
+                self._m4 = None
+                self._m12_cls = None
+                self._m12_reg = None
+                return False
             self._m4 = bundle["m4"]
             self._m12_cls = bundle["m12_cls"]
             self._m12_reg = bundle["m12_reg"]

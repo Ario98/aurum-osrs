@@ -66,7 +66,7 @@ function EquityCurveChart({ points }: { points: Array<{ ts: number; ml_gp: numbe
           </span>
         </div>
         <span className="tabular-nums text-zinc-500">
-          Out-of-sample · 25M start · 60% deployment · Exact 2% GE tax
+          Out-of-sample · 25M start · 4h buy-limit & 8-slot capped · Exact 2% GE tax
         </span>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} className="h-44 w-full overflow-visible">
@@ -434,7 +434,7 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
                     align="left"
                   />
                 </h3>
-                <span className="text-[11px] text-zinc-500">21 causal features</span>
+                <span className="text-[11px] text-zinc-500">23 causal features</span>
               </div>
               <div className="space-y-2">
                 {(report?.feature_importances || []).map((fi) => (
