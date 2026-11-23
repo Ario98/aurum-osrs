@@ -64,7 +64,12 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
       <div>
         <div className="flex items-start justify-between gap-2.5">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#141419]">
+            <button
+              type="button"
+              onClick={() => onOpenChart(call.item_id)}
+              title="Open item chart & order ticket"
+              className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#141419] transition hover:border-amber-400/40 hover:bg-[#1a1a23]"
+            >
               {call.icon ? (
                 <img
                   src={wikiIconUrl(call.icon)}
@@ -78,14 +83,16 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
               <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-bold text-zinc-300 ring-1 ring-white/15">
                 {rank}
               </span>
-            </div>
+            </button>
             <div className="min-w-0">
               <button
+                type="button"
                 onClick={() => onOpenChart(call.item_id)}
-                className="truncate text-left text-sm font-semibold text-zinc-100 hover:text-white transition block max-w-full"
-                title={call.item_name}
+                className="group/item inline-flex items-center gap-1 truncate text-left text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition max-w-full"
+                title="Open item chart & order ticket"
               >
-                {call.item_name}
+                <span className="truncate">{call.item_name}</span>
+                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${badge.cls}`}>

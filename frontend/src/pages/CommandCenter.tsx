@@ -300,20 +300,28 @@ function TradeCallRow({
         {/* 1. Item & Strategy */}
         <div className="flex items-center gap-3 min-w-0">
           <span className="w-5 text-center text-[11px] font-mono-num text-zinc-600 shrink-0">{rank}</span>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217]">
+          <button
+            type="button"
+            onClick={() => onOpenChart(call.item_id)}
+            title="Open item chart & order ticket"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217] transition hover:border-amber-400/40 hover:bg-[#191922]"
+          >
             {call.icon ? (
               <img src={wikiIconUrl(call.icon)} alt="" className="h-6 w-6 object-contain" loading="lazy" />
             ) : (
               <Sparkles className="h-4 w-4 text-amber-400" />
             )}
-          </div>
+          </button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => onOpenChart(call.item_id)}
-                className="truncate text-sm font-semibold text-zinc-100 hover:text-white transition"
+                title="Open item chart & order ticket"
+                className="group/item inline-flex items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
               >
-                {call.item_name}
+                <span className="truncate">{call.item_name}</span>
+                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold tracking-wider ${pill.cls}`}>
                 {pill.label}

@@ -173,7 +173,11 @@ export function Arbitrage({ members, tickVersion, onOpenChart }: Props) {
               {(data?.decanting || []).map((d) => (
                 <tr key={`${d.from_item_id}-${d.to_item_id}`} className="hover:bg-white/[0.03]">
                   <td className="px-4 py-3">
-                    <button onClick={() => onOpenChart(d.from_item_id)} className="font-semibold text-zinc-100 hover:text-white">
+                    <button
+                      onClick={() => onOpenChart(d.from_item_id)}
+                      title="Open item chart & order ticket"
+                      className="font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2"
+                    >
                       {d.from_item_name}
                     </button>
                     <span className="mx-1.5 text-zinc-600">→</span>

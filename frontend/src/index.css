@@ -9,6 +9,16 @@
     color: #f4f4f5;
   }
 
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }

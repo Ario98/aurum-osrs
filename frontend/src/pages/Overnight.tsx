@@ -319,20 +319,28 @@ function OvernightRow({
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[2fr_1.7fr_1fr_1.4fr_0.9fr_auto] lg:items-center lg:gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <span className="w-5 text-center text-[11px] font-mono-num text-zinc-600 shrink-0">{rank}</span>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217]">
+          <button
+            type="button"
+            onClick={() => onOpenChart(flip.item_id)}
+            title="Open item chart & order ticket"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217] transition hover:border-amber-400/40 hover:bg-[#191922]"
+          >
             {flip.icon ? (
               <img src={wikiIconUrl(flip.icon)} alt="" className="h-6 w-6 object-contain" loading="lazy" />
             ) : (
               <Sparkles className="h-4 w-4 text-indigo-300" />
             )}
-          </div>
+          </button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => onOpenChart(flip.item_id)}
-                className="truncate text-sm font-semibold text-zinc-100 hover:text-white"
+                title="Open item chart & order ticket"
+                className="group/item inline-flex items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
               >
-                {flip.item_name}
+                <span className="truncate">{flip.item_name}</span>
+                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${riskBadge}`}>
                 {flip.overnight_risk}
@@ -475,18 +483,26 @@ function OvernightCard({
       <div>
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#141419]">
+            <button
+              type="button"
+              onClick={() => onOpenChart(flip.item_id)}
+              title="Open item chart & order ticket"
+              className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#141419] transition hover:border-amber-400/40 hover:bg-[#1a1a23]"
+            >
               {flip.icon && <img src={wikiIconUrl(flip.icon)} alt="" className="h-7 w-7 object-contain" />}
               <span className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-[10px] font-bold text-zinc-300 ring-1 ring-white/15">
                 {rank}
               </span>
-            </div>
+            </button>
             <div className="min-w-0">
               <button
+                type="button"
                 onClick={() => onOpenChart(flip.item_id)}
-                className="truncate block max-w-full text-left text-sm font-semibold text-zinc-100 hover:text-white"
+                title="Open item chart & order ticket"
+                className="group/item inline-flex items-center gap-1 truncate max-w-full text-left text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
               >
-                {flip.item_name}
+                <span className="truncate">{flip.item_name}</span>
+                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500">
                 <span>{flip.overnight_risk} RISK</span>

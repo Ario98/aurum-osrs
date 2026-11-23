@@ -46,7 +46,11 @@ export function Journal({ slotsVersion, onOpenChart }: Props) {
               return (
                 <div key={bl.item_id} className="rounded-xl border border-white/[0.06] bg-[#070709] p-3 text-xs">
                   <div className="flex items-center justify-between gap-2">
-                    <button onClick={() => onOpenChart(bl.item_id)} className="truncate font-semibold text-zinc-100 hover:text-white">
+                    <button
+                      onClick={() => onOpenChart(bl.item_id)}
+                      title="Open item chart & order ticket"
+                      className="truncate font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2"
+                    >
                       {bl.item_name}
                     </button>
                     <span className="text-[11px] font-semibold text-amber-300 tabular-nums">

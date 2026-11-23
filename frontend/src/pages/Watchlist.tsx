@@ -179,16 +179,24 @@ function WatchlistRow({
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.6fr_1.1fr_2.4fr_auto] lg:items-center lg:gap-4">
         {/* Item Info */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217]">
+          <button
+            type="button"
+            onClick={() => onOpenChart(item.item_id)}
+            title="Open item chart & order ticket"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-[#121217] transition hover:border-amber-400/40 hover:bg-[#191922]"
+          >
             {item.icon && <img src={wikiIconUrl(item.icon)} alt="" className="h-6 w-6 object-contain" />}
-          </div>
+          </button>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => onOpenChart(item.item_id)}
-                className="truncate text-sm font-semibold text-zinc-100 hover:text-white"
+                title="Open item chart & order ticket"
+                className="group/item inline-flex items-center gap-1 truncate text-sm font-semibold text-zinc-100 hover:text-amber-300 hover:underline underline-offset-2 transition"
               >
-                {item.item_name}
+                <span className="truncate">{item.item_name}</span>
+                <span className="text-[10px] text-amber-400/0 transition group-hover/item:text-amber-400">↗</span>
               </button>
               {isTriggered && (
                 <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300 animate-pulse">
