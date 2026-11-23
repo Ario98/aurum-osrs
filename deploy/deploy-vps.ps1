@@ -65,7 +65,12 @@ rm -f /tmp/osrs_v2_deploy.tar.gz
 cd ~/osrs_trading_dashboard
 ~/.local/bin/uv pip install --python .venv/bin/python ./backend -q
 systemctl --user restart osrs-terminal.service
-sleep 2
+for i in $(seq 1 15); do
+  if curl -fsS http://127.0.0.1:9119/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
 systemctl --user is-active osrs-terminal.service
 curl -fsS http://127.0.0.1:9119/health
 echo ""

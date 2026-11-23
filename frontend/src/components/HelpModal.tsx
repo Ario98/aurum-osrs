@@ -151,11 +151,19 @@ export function HelpModal({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.removeEventListener('keydown', onKey);
+    };
   }, [open, onClose]);
 
   const filteredGlossary = useMemo(() => {
@@ -224,7 +232,7 @@ export function HelpModal({ open, onClose }: Props) {
         </div>
 
         {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs leading-relaxed text-zinc-300">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4 text-xs leading-relaxed text-zinc-300">
           {tab === 'quickstart' && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

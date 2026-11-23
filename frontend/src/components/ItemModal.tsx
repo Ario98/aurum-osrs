@@ -72,11 +72,19 @@ export function ItemModal({
 
   useEffect(() => {
     if (!itemId) return;
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+      window.removeEventListener('keydown', onKey);
+    };
   }, [itemId, onClose]);
 
   useEffect(() => {
@@ -421,7 +429,7 @@ export function ItemModal({
         </div>
 
         {/* Body: Spacious 2-Column Layout */}
-        <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[1.68fr_1fr]">
+        <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto overscroll-contain p-5 lg:grid-cols-[1.68fr_1fr]">
           {/* LEFT COLUMN: Synced 2-Pane Chart (Price + Dedicated Buy/Sell Volume) + Volume Breakdown */}
           <div className="space-y-3.5 min-w-0">
             {/* Controls + Live Crosshair Readout */}
