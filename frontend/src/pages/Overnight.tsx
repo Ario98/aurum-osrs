@@ -364,9 +364,6 @@ function OvernightRow({
                   tooltipText="Official OSRS GE tax-exempt item. You keep 100% of the spread."
                 />
               )}
-              <span className="text-[11px] text-zinc-500 font-mono-num">
-                · Cost <span className="text-zinc-300">{formatGp(flip.capital_required, true)}</span>
-              </span>
             </div>
           </div>
         </div>
@@ -375,8 +372,11 @@ function OvernightRow({
           <button
             onClick={() => copyPrice('buy', flip.buy_price)}
             className="flex flex-col rounded-lg border border-white/[0.06] bg-[#07070a] px-2.5 py-1.5 text-left hover:border-white/[0.16]"
+            title={`Copy exact Bid price · Total cost ${formatGp(flip.capital_required)} gp`}
           >
-            <span className="font-sans text-[9px] uppercase text-zinc-500">Bid {flip.quantity.toLocaleString()}x</span>
+            <span className="font-sans text-[9px] uppercase text-zinc-500 whitespace-nowrap">
+              Bid {flip.quantity.toLocaleString()}x · <span className="text-zinc-300 font-mono-num">{formatGp(flip.capital_required, true)}</span>
+            </span>
             <span className="flex items-center gap-1 text-xs font-bold text-zinc-100">
               {formatGp(flip.buy_price)}
               {copied === 'buy' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-2.5 w-2.5 text-zinc-600" />}

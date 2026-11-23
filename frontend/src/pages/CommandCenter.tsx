@@ -378,9 +378,6 @@ function TradeCallRow({
                   tooltipText="Items ≥ 250M gp cap GE tax at 5,000,000 gp per unit instead of a full 2%, reducing your effective tax rate."
                 />
               )}
-              <span className="text-[11px] text-zinc-500 font-mono-num">
-                · Cost <span className="text-zinc-300">{formatGp(call.capital_required, true)}</span>
-              </span>
             </div>
           </div>
         </div>
@@ -390,10 +387,10 @@ function TradeCallRow({
           <button
             onClick={() => copyPrice('buy', call.buy_price)}
             className="flex flex-col rounded-lg border border-white/[0.06] bg-[#07070a] px-2.5 py-1.5 text-left hover:border-white/[0.16] transition"
-            title="Copy exact Buy price"
+            title={`Copy exact Buy price · Total cost ${formatGp(call.capital_required)} gp`}
           >
-            <span className="font-sans text-[9px] uppercase tracking-wider text-zinc-500">
-              Buy {call.quantity.toLocaleString()}x
+            <span className="font-sans text-[9px] uppercase tracking-wider text-zinc-500 whitespace-nowrap">
+              Buy {call.quantity.toLocaleString()}x · <span className="text-zinc-300 font-mono-num">{formatGp(call.capital_required, true)}</span>
             </span>
             <span className="flex items-center gap-1 text-xs font-bold text-zinc-100">
               {formatGp(call.buy_price)}
