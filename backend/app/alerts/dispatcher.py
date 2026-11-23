@@ -166,6 +166,50 @@ class AlertDispatcher:
                     send_to_discord=discord_coach,
                 )
 
+        # 1b. Personal Watchlist Custom Price & Margin Targets
+        watch_items = await self.repo.get_watchlist()
+        for w in watch_items:
+            m = state.metrics.get(int(w["item_id"]))
+            if not m:
+                continue
+            send_dc = bool(w.get("discord_notify", True))
+            if w.get("buy_below") and m.low and m.low <= int(w["buy_below"]):
+                await self.emit(
+                    alert_type="WATCHLIST_BUY_TARGET",
+                    dedupe_key=f"watch_buy_{m.id}",
+                    title=f"Watchlist Buy Target Hit: {m.name}",
+                    message=f"Live low dropped to **{m.low:,} gp** (target ≤ {int(w['buy_below']):,} gp). Live high: **{m.high or 0:,} gp**.",
+                    severity="success",
+                    item_id=m.id,
+                    item_name=m.name,
+                    cooldown_sec=900,
+                    send_to_discord=send_dc,
+                )
+            if w.get("sell_above") and m.high and m.high >= int(w["sell_above"]):
+                await self.emit(
+                    alert_type="WATCHLIST_SELL_TARGET",
+                    dedupe_key=f"watch_sell_{m.id}",
+                    title=f"Watchlist Sell Target Hit: {m.name}",
+                    message=f"Live high reached **{m.high:,} gp** (target ≥ {int(w['sell_above']):,} gp).",
+                    severity="success",
+                    item_id=m.id,
+                    item_name=m.name,
+                    cooldown_sec=900,
+                    send_to_discord=send_dc,
+                )
+            if w.get("min_net_margin") and m.net_margin >= int(w["min_net_margin"]):
+                await self.emit(
+                    alert_type="WATCHLIST_MARGIN_TARGET",
+                    dedupe_key=f"watch_margin_{m.id}",
+                    title=f"Watchlist Margin Target Hit: {m.name}",
+                    message=f"Net margin after 2% tax is **+{m.net_margin:,} gp** ({m.net_roi_pct:.1f}% ROI, target ≥ {int(w['min_net_margin']):,} gp).",
+                    severity="info",
+                    item_id=m.id,
+                    item_name=m.name,
+                    cooldown_sec=900,
+                    send_to_discord=send_dc,
+                )
+
         # 2. High-conviction Dump / Crash Snipes
         top_dumps = [
             m

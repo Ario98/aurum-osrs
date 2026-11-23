@@ -11,6 +11,7 @@ import {
   Moon,
   Search,
   Settings as SettingsIcon,
+  Star,
   Volume2,
   VolumeX,
   Zap,
@@ -27,9 +28,11 @@ import { Journal } from './pages/Journal';
 import { Overnight } from './pages/Overnight';
 import { Scanner } from './pages/Scanner';
 import { Settings } from './pages/Settings';
+import { Watchlist } from './pages/Watchlist';
 import type {
   ActiveSlot,
   AlertItem,
+  ItemMetrics,
   MarketStatus,
   OvernightFlip,
   StrategyMode,
@@ -39,7 +42,7 @@ import type {
 } from './types';
 import { formatGp, parseGpInput, playAlertChime } from './utils/format';
 
-type NavTab = 'command' | 'overnight' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
+type NavTab = 'command' | 'overnight' | 'watchlist' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
 
 const BANK_PRESETS = [
   { label: '5M', value: 5_000_000 },
@@ -80,6 +83,8 @@ export default function App() {
 
   const [tickVersion, setTickVersion] = useState(0);
   const [slotsVersion, setSlotsVersion] = useState(0);
+  const [watchlistVersion, setWatchlistVersion] = useState(0);
+  const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
 
   // Global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -158,6 +163,16 @@ export default function App() {
     }
   }, []);
 
+  const refreshWatchlistIds = useCallback(async () => {
+    try {
+      const res = await api.watchlist();
+      setStarredIds(new Set(res.items.map((w) => w.item_id)));
+      setWatchlistVersion((v) => v + 1);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     if (!authenticated) return;
     api.settings().then((s) => {
@@ -169,7 +184,8 @@ export default function App() {
     refreshStatus();
     refreshSlots();
     refreshAlerts();
-  }, [authenticated, refreshStatus, refreshSlots, refreshAlerts]);
+    refreshWatchlistIds();
+  }, [authenticated, refreshStatus, refreshSlots, refreshAlerts, refreshWatchlistIds]);
 
   useEffect(() => {
     if (!authenticated || status?.ready) return;
@@ -275,6 +291,20 @@ export default function App() {
     await refreshSlots();
   };
 
+  const handleToggleStar = async (item: ItemMetrics) => {
+    if (starredIds.has(item.id)) {
+      await api.deleteWatchlist(item.id);
+    } else {
+      await api.upsertWatchlist({
+        item_id: item.id,
+        item_name: item.name,
+        buy_below: item.low ? Math.max(1, Math.round(item.low * 0.97)) : null,
+        discord_notify: true,
+      });
+    }
+    await refreshWatchlistIds();
+  };
+
   const handleSettingsSaved = (s: UserSettings) => {
     setCashStack(s.cash_stack);
     setMembers(s.members);
@@ -330,6 +360,7 @@ export default function App() {
   const navItems: { key: NavTab; label: string; shortLabel: string; icon: React.ReactNode }[] = [
     { key: 'command', label: 'Trade Calls', shortLabel: 'Trade', icon: <Zap className="h-[18px] w-[18px]" /> },
     { key: 'overnight', label: 'Overnight', shortLabel: 'Night', icon: <Moon className="h-[18px] w-[18px]" /> },
+    { key: 'watchlist', label: 'Watchlist & Alerts', shortLabel: 'Watch', icon: <Star className="h-[18px] w-[18px]" /> },
     { key: 'scanner', label: 'Market Scanner', shortLabel: 'Scan', icon: <Search className="h-[18px] w-[18px]" /> },
     { key: 'arbitrage', label: 'Arbitrage', shortLabel: 'Arb', icon: <FlaskConical className="h-[18px] w-[18px]" /> },
     { key: 'journal', label: 'Journal & Limits', shortLabel: 'Journal', icon: <BookOpen className="h-[18px] w-[18px]" /> },
@@ -578,6 +609,15 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'watchlist' && (
+            <Watchlist
+              tickVersion={tickVersion}
+              watchlistVersion={watchlistVersion}
+              onWatchlistChanged={refreshWatchlistIds}
+              onOpenChart={setSelectedItemId}
+            />
+          )}
+
           {activeTab === 'scanner' && (
             <Scanner members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
           )}
@@ -595,7 +635,7 @@ export default function App() {
       </div>
 
       {/* Mobile / iPhone Fixed Bottom Navigation Bar */}
-      <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
+      <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-7 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
         {navItems.map((n) => {
           const active = activeTab === n.key;
           return (
@@ -624,6 +664,8 @@ export default function App() {
         cashStack={cashStack}
         freeSlots={Math.max(1, 8 - slots.length)}
         slotsFull={slots.length >= 8}
+        isStarred={selectedItemId !== null && starredIds.has(selectedItemId)}
+        onToggleStar={handleToggleStar}
         onClose={() => setSelectedItemId(null)}
         onStartCustomFlip={handleStartCustomFlip}
       />

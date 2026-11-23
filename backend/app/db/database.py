@@ -137,6 +137,18 @@ CREATE TABLE IF NOT EXISTS meta_state (
     value TEXT NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    item_id INTEGER PRIMARY KEY,
+    item_name TEXT NOT NULL,
+    buy_below INTEGER,
+    sell_above INTEGER,
+    min_net_margin INTEGER,
+    discord_notify INTEGER NOT NULL DEFAULT 1,
+    notes TEXT DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 """
 
 

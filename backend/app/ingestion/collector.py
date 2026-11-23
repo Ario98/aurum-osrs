@@ -183,7 +183,7 @@ class CollectorService:
         await self.broadcast_cb({"type": "bootstrap_ready", "progress": self.state.bootstrap_progress})
 
     async def _background_1h_enrichment(self) -> None:
-        """Non-blocking backfill of 7-day /1h history for sharp Z-scores & hour-of-week seasonality."""
+        """Non-blocking 30-day /1h backfill for 4-week seasonality, 24h rollups & Phase 5 ML."""
         now = int(time.time())
         latest_closed_1h = _floor_bucket(now, 3600) - 3600
         total_hours = self.settings.bootstrap_1h_background_days * 24
@@ -191,34 +191,45 @@ class CollectorService:
         existing = await self.repo.get_existing_bucket_timestamps("candles_1h", min(target_buckets))
         missing = [ts for ts in target_buckets if ts not in existing]
 
-        if not missing:
-            self.state.bootstrap_bg_done = True
-            self.state.bootstrap_progress["bg_done"] = True
-            logger.info("Background 7d 1h history already complete")
-            return
+        if missing:
+            logger.info(
+                "Background enrichment: fetching %d missing 1h buckets (%dd history, non-blocking)...",
+                len(missing),
+                self.settings.bootstrap_1h_background_days,
+            )
+            fetched = 0
+            cutoff_ram = now - 8 * 86400
+            for ts in missing:
+                if self._stop_event.is_set():
+                    return
+                try:
+                    actual_ts, data = await self.wiki.fetch_1h(ts)
+                    if actual_ts and data:
+                        await self.repo.upsert_candles("candles_1h", actual_ts, data)
+                        if actual_ts >= cutoff_ram:
+                            self.state.ingest_candle_bucket("1h", actual_ts, data)
+                        fetched += 1
+                        self.state.bootstrap_progress["buckets_1h_loaded"] += 1
+                        if fetched % 48 == 0:
+                            self.state.recompute_all_metrics()
+                except Exception as exc:
+                    logger.warning("Background 1h bucket %d failed: %s", ts, exc)
+            logger.info("Background 30d 1h backfill fetched +%d buckets", fetched)
+        else:
+            logger.info("Background %dd 1h history already complete", self.settings.bootstrap_1h_background_days)
 
-        logger.info("Background enrichment: fetching %d missing 1h buckets (non-blocking)...", len(missing))
-        fetched = 0
-        for ts in missing:
-            if self._stop_event.is_set():
-                return
-            try:
-                actual_ts, data = await self.wiki.fetch_1h(ts)
-                if actual_ts and data:
-                    await self.repo.upsert_candles("candles_1h", actual_ts, data)
-                    self.state.ingest_candle_bucket("1h", actual_ts, data)
-                    fetched += 1
-                    self.state.bootstrap_progress["buckets_1h_loaded"] += 1
-                    # Refresh in-memory stats every 24 buckets (~1 day)
-                    if fetched % 24 == 0:
-                        self.state.recompute_all_metrics()
-            except Exception as exc:
-                logger.warning("Background 1h bucket %d failed: %s", ts, exc)
-
+        # Roll up completed UTC days into permanent candles_24h & compute 30d seasonality
+        rolled = await self.repo.rollup_candles_24h()
+        seasonality = await self.repo.compute_30d_hour_seasonality()
+        self.state.set_seasonality_30d(seasonality)
         self.state.recompute_all_metrics()
         self.state.bootstrap_bg_done = True
         self.state.bootstrap_progress["bg_done"] = True
-        logger.info("Background 7d 1h enrichment complete (+%d buckets)", fetched)
+        logger.info(
+            "Background enrichment complete: rolled %d daily rows, computed 30d seasonality for %d items",
+            rolled,
+            len(seasonality),
+        )
         await self.broadcast_cb({"type": "enrichment_complete", "progress": self.state.bootstrap_progress})
 
     async def _latest_loop(self) -> None:
@@ -298,6 +309,9 @@ class CollectorService:
                 pass
 
             try:
+                await self.repo.rollup_candles_24h()
+                seasonality = await self.repo.compute_30d_hour_seasonality()
+                self.state.set_seasonality_30d(seasonality)
                 await self.db.prune_old_candles(
                     retention_5m_days=self.settings.retention_5m_days,
                     retention_1h_days=self.settings.retention_1h_days,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
-import { AlertTriangle, Check, Copy, Flame, Info, Moon, Play, TrendingUp, X, Zap } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Flame, Info, Moon, Play, Star, TrendingUp, X, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChartPoint, ItemMetrics } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
@@ -10,6 +10,8 @@ interface Props {
   cashStack: number;
   freeSlots: number;
   slotsFull: boolean;
+  isStarred: boolean;
+  onToggleStar: (item: ItemMetrics) => Promise<void>;
   onClose: () => void;
   onStartCustomFlip: (params: {
     item_id: number;
@@ -33,7 +35,16 @@ function computeGeTax(sellPrice: number, isTaxExempt: boolean): number {
   return Math.min(Math.floor(sellPrice * 0.02), 5_000_000);
 }
 
-export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, onStartCustomFlip }: Props) {
+export function ItemModal({
+  itemId,
+  cashStack,
+  freeSlots,
+  slotsFull,
+  isStarred,
+  onToggleStar,
+  onClose,
+  onStartCustomFlip,
+}: Props) {
   const [item, setItem] = useState<ItemMetrics | null>(null);
   const [timestep, setTimestep] = useState<'5m' | '1h' | '6h' | '24h'>('5m');
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -382,6 +393,20 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
                   </div>
                 </div>
               </div>
+            )}
+            {item && (
+              <button
+                onClick={() => onToggleStar(item)}
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                  isStarred
+                    ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+                    : 'border-white/[0.08] bg-zinc-900 text-zinc-400 hover:text-amber-300'
+                }`}
+                title={isStarred ? 'Remove from Watchlist' : 'Add to Watchlist & Price Alerts'}
+              >
+                <Star className={`h-3.5 w-3.5 ${isStarred ? 'fill-current' : ''}`} />
+                <span className="hidden sm:inline">{isStarred ? 'Watching' : 'Watch'}</span>
+              </button>
             )}
             <button
               onClick={onClose}

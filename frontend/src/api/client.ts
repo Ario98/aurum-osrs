@@ -12,6 +12,7 @@ import type {
   StrategyMode,
   TradeCallsResponse,
   UserSettings,
+  WatchlistItem,
 } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -168,4 +169,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ webhook_url: webhook_url || undefined }),
     }),
+
+  // Watchlist
+  watchlist: () => request<{ items: WatchlistItem[] }>('/api/watchlist'),
+  upsertWatchlist: (body: {
+    item_id: number;
+    item_name?: string;
+    buy_below?: number | null;
+    sell_above?: number | null;
+    min_net_margin?: number | null;
+    discord_notify?: boolean;
+    notes?: string;
+  }) =>
+    request<WatchlistItem>('/api/watchlist', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deleteWatchlist: (itemId: number) =>
+    request<{ deleted: boolean }>(`/api/watchlist/${itemId}`, { method: 'DELETE' }),
 };

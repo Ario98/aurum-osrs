@@ -1,18 +1,33 @@
 <#
 .SYNOPSIS
-    1-command deploy of OSRS Flip Terminal v2 to your Hetzner VPS.
+    1-command deploy of OSRS Flip Terminal v2 to a Linux VPS running systemd --user.
     Builds frontend locally, uploads code only (NEVER touches VPS .env or SQLite DB),
     updates Python deps via uv, restarts osrs-terminal.service, and verifies /health.
 .EXAMPLE
+    .\deploy\deploy-vps.ps1 -VpsHost "user@your-vps-ip"
+    # Or save "user@your-vps-ip" in gitignored deploy\.deploy.local and run:
     .\deploy\deploy-vps.ps1
-    .\deploy\deploy-vps.ps1 -VpsHost "amar@167.233.16.177"
 #>
 param(
-    [string]$VpsHost = "amar@167.233.16.177"
+    [string]$VpsHost = ""
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$LocalHostFile = Join-Path $PSScriptRoot ".deploy.local"
+
+if (-not $VpsHost) {
+    if ($env:OSRS_VPS_HOST) {
+        $VpsHost = $env:OSRS_VPS_HOST.Trim()
+    } elseif (Test-Path $LocalHostFile) {
+        $VpsHost = (Get-Content $LocalHostFile -Raw).Trim()
+    }
+}
+
+if (-not $VpsHost) {
+    throw "No VPS host configured. Pass -VpsHost 'user@your-vps-ip', set OSRS_VPS_HOST, or create gitignored deploy\.deploy.local."
+}
+
 $TempTar = Join-Path $env:TEMP "osrs_v2_deploy.tar.gz"
 
 Write-Host "=== 1/4 Building React frontend locally ===" -ForegroundColor Cyan

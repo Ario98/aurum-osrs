@@ -143,6 +143,56 @@ def test_metrics_and_trade_calls():
     assert len(overnight) > 0
     assert all(f["est_net_profit"] > 0 and f["p25_7d"] <= f["p75_7d"] for f in overnight)
 
+    # Verify two-stage recompute uses cached candle stats and runs cleanly
+    fast_ms = state.recompute_all_metrics()
+    assert fast_ms >= 0.0
+    assert state.metrics[4151].net_margin > 0
+
+
+@pytest.mark.asyncio
+async def test_watchlist_and_24h_rollup(tmp_path: Path):
+    from app.db.database import Database
+    from app.db.repository import Repository
+    from app.routers import watchlist as watchlist_router
+    from fastapi import FastAPI
+
+    db = Database(tmp_path / "watch.db")
+    await db.connect()
+    repo = Repository(db)
+    state = _build_sample_state()
+
+    # Verify daily rollup inserts rows for yesterday's UTC hours
+    now = int(time.time())
+    yesterday_hr = ((now // 86400) - 1) * 86400 + 3600
+    await repo.upsert_candles("candles_1h", yesterday_hr, {4151: {"avgHighPrice": 1550000, "avgLowPrice": 1500000, "highPriceVolume": 10, "lowPriceVolume": 12}})
+    rolled = await repo.rollup_candles_24h()
+    assert rolled >= 1
+
+    # Verify watchlist CRUD + target trigger detection
+    app = FastAPI()
+    app.state.repo = repo
+    app.state.market_state = state
+    app.include_router(watchlist_router.router)
+    client = TestClient(app)
+
+    res = client.post(
+        "/api/watchlist",
+        json={"item_id": 4151, "buy_below": 1_520_000, "min_net_margin": 10_000, "discord_notify": True},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["item_name"] == "Abyssal whip"
+    assert "BUY_BELOW" in data["triggered"]
+    assert "MIN_MARGIN" in data["triggered"]
+
+    listed = client.get("/api/watchlist").json()
+    assert len(listed["items"]) == 1
+
+    deleted = client.delete("/api/watchlist/4151").json()
+    assert deleted["deleted"] is True
+
+    await db.close()
+
 
 def test_arbitrage_decanting_and_sets():
     state = _build_sample_state()

@@ -1,4 +1,4 @@
-"""Blazing-fast in-memory market state and vectorized OSRS flipping metrics engine."""
+"""Blazing-fast in-memory market state and two-stage OSRS flipping metrics engine."""
 
 from __future__ import annotations
 
@@ -21,6 +21,35 @@ logger = logging.getLogger(__name__)
 
 NATURE_RUNE_ID = 561
 DEFAULT_NATURE_RUNE_PRICE = 100
+
+
+@dataclass(slots=True)
+class CachedCandleStats:
+    """Precomputed 5m/1h/24h/7d/30d candle aggregates — refreshed only when candles change."""
+
+    vol_5m_h: int = 0
+    vol_5m_l: int = 0
+    vol_1h_h: int = 0
+    vol_1h_l: int = 0
+    vol_24h_h: int = 0
+    vol_24h_l: int = 0
+    avg_high_1h: Optional[int] = None
+    avg_low_1h: Optional[int] = None
+    prev_1h_price: Optional[float] = None
+    oldest_24h_price: Optional[float] = None
+    vwap_24h: Optional[float] = None
+    std_24h: float = 0.0
+    volatility_24h_pct: float = 0.0
+    vwap_7d: Optional[float] = None
+    std_7d: float = 0.0
+    candles_1h_count: int = 0
+    p25_7d: Optional[int] = None
+    p75_7d: Optional[int] = None
+    min_7d: Optional[int] = None
+    max_7d: Optional[int] = None
+    trend_7d_pct: float = 0.0
+    # hour (0-23 UTC) -> % deviation vs multi-week mean
+    seasonality_by_hour: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -206,8 +235,11 @@ def _clamp(val: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, val))
 
 
+EMPTY_CANDLE_STATS = CachedCandleStats()
+
+
 class MarketState:
-    """In-memory state holding all ~4,100 items, recent candles, and precomputed metrics."""
+    """In-memory state holding ~4,600 items, cached hourly stats (~35ms live recompute)."""
 
     def __init__(self) -> None:
         self.items: dict[int, dict[str, Any]] = {}
@@ -217,6 +249,12 @@ class MarketState:
         # Rolling in-memory candle windows: item_id -> {ts: (avg_high, avg_low, high_vol, low_vol)}
         self.candles_5m: dict[int, dict[int, tuple[Optional[int], Optional[int], int, int]]] = defaultdict(dict)
         self.candles_1h: dict[int, dict[int, tuple[Optional[int], Optional[int], int, int]]] = defaultdict(dict)
+
+        # Cached slow candle aggregates (rebuilt only when 5m/1h candles arrive!)
+        self._candle_stats: dict[int, CachedCandleStats] = {}
+        self._candles_dirty: bool = True
+        # Optional 30-day multi-week seasonality map loaded from SQLite: item_id -> {hour: bias_pct}
+        self._seasonality_30d: dict[int, dict[int, float]] = {}
 
         # Computed snapshots
         self.metrics: dict[int, ItemMetrics] = {}
@@ -245,6 +283,11 @@ class MarketState:
             name = (item.get("name") or "").strip().lower()
             if name:
                 self.name_to_id[name] = item_id
+        self._candles_dirty = True
+
+    def set_seasonality_30d(self, mapping: dict[int, dict[int, float]]) -> None:
+        self._seasonality_30d = mapping
+        self._candles_dirty = True
 
     def update_latest(self, prices: dict[int, dict[str, Any]]) -> None:
         self.latest.update(prices)
@@ -262,6 +305,7 @@ class MarketState:
         for item_id, ts, avg_h, avg_l, h_vol, l_vol in rows:
             target[item_id][ts] = (avg_h, avg_l, h_vol, l_vol)
         self._prune_memory_windows()
+        self._candles_dirty = True
 
     def ingest_candle_bucket(self, resolution: str, ts: int, prices: dict[int, dict[str, Any]]) -> None:
         target = self.candles_5m if resolution == "5m" else self.candles_1h
@@ -273,11 +317,12 @@ class MarketState:
                 int(data.get("lowPriceVolume") or 0),
             )
         self._prune_memory_windows()
+        self._candles_dirty = True
 
     def _prune_memory_windows(self) -> None:
         now = int(time.time())
         cutoff_5m = now - 6 * 3600       # Keep 6h of 5m buckets in RAM
-        cutoff_1h = now - 8 * 86400      # Keep 8d of 1h buckets in RAM
+        cutoff_1h = now - 8 * 86400      # Keep 8d of 1h buckets in RAM (30d seasonality computed via SQLite)
 
         for bucket_map in self.candles_5m.values():
             stale = [ts for ts in bucket_map if ts < cutoff_5m]
@@ -289,15 +334,140 @@ class MarketState:
             for ts in stale:
                 del bucket_map[ts]
 
-    def recompute_all_metrics(self) -> float:
-        """Recompute all flipping metrics across ~4,100 items in-memory."""
+    def recompute_candle_aggregates(self) -> float:
+        """Rebuild cached 5m/1h/24h/7d candle statistics (called only when new candle buckets arrive)."""
         t0 = time.perf_counter()
         now = int(time.time())
-        now_dt = datetime.fromtimestamp(now, tz=timezone.utc)
-        current_hour_of_day = now_dt.hour
         cutoff_24h = now - 24 * 3600
         cutoff_1h = now - 3600
-        cutoff_5m = now - 15 * 60  # Latest available 5m bucket (handles ~5-10m publish lag)
+        cutoff_5m = now - 15 * 60
+
+        new_cache: dict[int, CachedCandleStats] = {}
+
+        for item_id in self.items:
+            cs = CachedCandleStats()
+
+            # 5m latest bucket
+            c5 = self.candles_5m.get(item_id)
+            if c5:
+                latest_5m_ts = max(c5.keys())
+                if latest_5m_ts >= cutoff_5m:
+                    _, _, cs.vol_5m_h, cs.vol_5m_l = c5[latest_5m_ts]
+
+            # 1h / 24h / 7d stats
+            c1 = self.candles_1h.get(item_id)
+            if c1:
+                sorted_ts = sorted(c1.keys())
+                latest_1h_ts = sorted_ts[-1]
+                if latest_1h_ts >= cutoff_1h - 3600:
+                    ah, al, vh, vl = c1[latest_1h_ts]
+                    cs.avg_high_1h, cs.avg_low_1h, cs.vol_1h_h, cs.vol_1h_l = ah, al, vh, vl
+                if len(sorted_ts) >= 2:
+                    pah, pal, _, _ = c1[sorted_ts[-2]]
+                    if pah and pal:
+                        cs.prev_1h_price = (pah + pal) / 2.0
+                    elif pah or pal:
+                        cs.prev_1h_price = float(pah or pal)
+
+                prices_24h: list[float] = []
+                vols_24h: list[int] = []
+                prices_7d: list[float] = []
+                vols_7d: list[int] = []
+                highs_7d: list[int] = []
+                lows_7d: list[int] = []
+                hour_buckets: dict[int, list[float]] = defaultdict(list)
+
+                for ts in sorted_ts:
+                    ah, al, vh, vl = c1[ts]
+                    tot_v = vh + vl
+                    bucket_mid: Optional[float] = None
+                    if ah and al:
+                        bucket_mid = (ah + al) / 2.0
+                    elif ah or al:
+                        bucket_mid = float(ah or al)
+
+                    if bucket_mid is not None:
+                        prices_7d.append(bucket_mid)
+                        vols_7d.append(max(tot_v, 1))
+                        if ah:
+                            highs_7d.append(ah)
+                        if al:
+                            lows_7d.append(al)
+                        hour_buckets[(ts // 3600) % 24].append(bucket_mid)
+
+                    if ts >= cutoff_24h:
+                        cs.vol_24h_h += vh
+                        cs.vol_24h_l += vl
+                        if bucket_mid is not None:
+                            if cs.oldest_24h_price is None:
+                                cs.oldest_24h_price = bucket_mid
+                            prices_24h.append(bucket_mid)
+                            vols_24h.append(max(tot_v, 1))
+
+                if prices_24h:
+                    arr24 = np.array(prices_24h, dtype=np.float64)
+                    w24 = np.array(vols_24h, dtype=np.float64)
+                    cs.vwap_24h = float(np.average(arr24, weights=w24))
+                    cs.std_24h = float(np.std(arr24))
+                    if cs.vwap_24h > 0:
+                        cs.volatility_24h_pct = (cs.std_24h / cs.vwap_24h) * 100.0
+
+                if prices_7d:
+                    arr7 = np.array(prices_7d, dtype=np.float64)
+                    w7 = np.array(vols_7d, dtype=np.float64)
+                    cs.vwap_7d = float(np.average(arr7, weights=w7))
+                    cs.std_7d = float(np.std(arr7))
+                else:
+                    cs.vwap_7d = cs.vwap_24h
+                    cs.std_7d = cs.std_24h
+
+                cs.candles_1h_count = len(prices_7d)
+
+                if lows_7d and highs_7d:
+                    arr_l = np.array(lows_7d, dtype=np.float64)
+                    arr_h = np.array(highs_7d, dtype=np.float64)
+                    cs.p25_7d = int(round(float(np.percentile(arr_l, 25))))
+                    cs.p75_7d = int(round(float(np.percentile(arr_h, 75))))
+                    cs.min_7d = int(round(float(np.percentile(arr_l, 5))))
+                    cs.max_7d = int(round(float(np.percentile(arr_h, 95))))
+                elif prices_7d:
+                    arr_p = np.array(prices_7d, dtype=np.float64)
+                    cs.p25_7d = int(round(float(np.percentile(arr_p, 25))))
+                    cs.p75_7d = int(round(float(np.percentile(arr_p, 75))))
+                    cs.min_7d = int(round(float(np.min(arr_p))))
+                    cs.max_7d = int(round(float(np.max(arr_p))))
+
+                if cs.vwap_24h and cs.vwap_7d and cs.vwap_7d > 0:
+                    cs.trend_7d_pct = ((cs.vwap_24h - cs.vwap_7d) / cs.vwap_7d) * 100.0
+
+                # Prefer 30-day multi-week seasonality if available, else derive from 7d RAM candles
+                s30 = self._seasonality_30d.get(item_id)
+                if s30:
+                    cs.seasonality_by_hour = s30
+                elif cs.vwap_7d and cs.vwap_7d > 0 and len(prices_7d) >= 36:
+                    cs.seasonality_by_hour = {
+                        hr: ((sum(vals) / len(vals)) - cs.vwap_7d) / cs.vwap_7d * 100.0
+                        for hr, vals in hour_buckets.items()
+                        if vals
+                    }
+
+            new_cache[item_id] = cs
+
+        self._candle_stats = new_cache
+        self._candles_dirty = False
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        logger.debug("Recomputed candle aggregates for %d items in %.1f ms", len(new_cache), elapsed_ms)
+        return elapsed_ms
+
+    def recompute_all_metrics(self) -> float:
+        """Recompute live flipping metrics across all ~4,600 items in ~25-45 ms using cached candle stats."""
+        if self._candles_dirty:
+            self.recompute_candle_aggregates()
+
+        t0 = time.perf_counter()
+        now = int(time.time())
+        current_hour_of_day = datetime.fromtimestamp(now, tz=timezone.utc).hour
+        nature_price = self.nature_rune_price
 
         new_metrics: dict[int, ItemMetrics] = {}
 
@@ -320,163 +490,49 @@ class MarketState:
             members = bool(meta.get("members", True))
             icon = meta.get("icon", "")
 
-            # --- 5m candle stats ---
-            c5 = self.candles_5m.get(item_id)
-            vol_5m_h = 0
-            vol_5m_l = 0
-            if c5:
-                latest_5m_ts = max(c5.keys())
-                if latest_5m_ts >= cutoff_5m:
-                    _, _, vol_5m_h, vol_5m_l = c5[latest_5m_ts]
+            cs = self._candle_stats.get(item_id, EMPTY_CANDLE_STATS)
+            vol_5m_h = cs.vol_5m_h
+            vol_5m_l = cs.vol_5m_l
             vol_5m = vol_5m_h + vol_5m_l
             ofi_5m = _ofi(vol_5m_h, vol_5m_l)
 
-            # --- 1h / 24h / 7d candle stats ---
-            c1 = self.candles_1h.get(item_id)
-            vol_1h_h = 0
-            vol_1h_l = 0
-            avg_high_1h: Optional[int] = None
-            avg_low_1h: Optional[int] = None
-            vol_24h_h = 0
-            vol_24h_l = 0
-
-            prices_24h: list[float] = []
-            vols_24h: list[int] = []
-            prices_7d: list[float] = []
-            vols_7d: list[int] = []
-            highs_7d: list[int] = []
-            lows_7d: list[int] = []
-            same_hour_prices: list[float] = []
-            oldest_24h_price: Optional[float] = None
-            prev_1h_price: Optional[float] = None
-
-            if c1:
-                sorted_ts = sorted(c1.keys())
-                latest_1h_ts = sorted_ts[-1]
-                if latest_1h_ts >= cutoff_1h - 3600:
-                    ah, al, vh, vl = c1[latest_1h_ts]
-                    avg_high_1h, avg_low_1h, vol_1h_h, vol_1h_l = ah, al, vh, vl
-                if len(sorted_ts) >= 2:
-                    pah, pal, _, _ = c1[sorted_ts[-2]]
-                    if pah and pal:
-                        prev_1h_price = (pah + pal) / 2.0
-                    elif pah or pal:
-                        prev_1h_price = float(pah or pal)
-
-                for ts in sorted_ts:
-                    ah, al, vh, vl = c1[ts]
-                    tot_v = vh + vl
-                    bucket_mid: Optional[float] = None
-                    if ah and al:
-                        bucket_mid = (ah + al) / 2.0
-                    elif ah or al:
-                        bucket_mid = float(ah or al)
-
-                    if bucket_mid is not None:
-                        prices_7d.append(bucket_mid)
-                        vols_7d.append(max(tot_v, 1))
-                        if ah:
-                            highs_7d.append(ah)
-                        if al:
-                            lows_7d.append(al)
-                        bucket_hour = (ts // 3600) % 24
-                        if bucket_hour == current_hour_of_day:
-                            same_hour_prices.append(bucket_mid)
-
-                    if ts >= cutoff_24h:
-                        vol_24h_h += vh
-                        vol_24h_l += vl
-                        if bucket_mid is not None:
-                            if oldest_24h_price is None:
-                                oldest_24h_price = bucket_mid
-                            prices_24h.append(bucket_mid)
-                            vols_24h.append(max(tot_v, 1))
-
-            vol_1h = vol_1h_h + vol_1h_l
+            vol_24h_h = cs.vol_24h_h
+            vol_24h_l = cs.vol_24h_l
             vol_24h = vol_24h_h + vol_24h_l
-            # If latest 1h bucket hasn't closed/populated yet, estimate 1h flow from 24h average
-            eff_vol_1h_h = vol_1h_h if vol_1h_h > 0 else max(0, vol_24h_h // 24)
-            eff_vol_1h_l = vol_1h_l if vol_1h_l > 0 else max(0, vol_24h_l // 24)
+            eff_vol_1h_h = cs.vol_1h_h if cs.vol_1h_h > 0 else max(0, vol_24h_h // 24)
+            eff_vol_1h_l = cs.vol_1h_l if cs.vol_1h_l > 0 else max(0, vol_24h_l // 24)
             eff_vol_1h = eff_vol_1h_h + eff_vol_1h_l
 
             ofi_1h = _ofi(eff_vol_1h_h, eff_vol_1h_l)
             ofi_24h = _ofi(vol_24h_h, vol_24h_l)
 
-            # VWAP, Volatility & Z-Scores (calculated across hourly 1h candles)
-            vwap_24h: Optional[float] = None
-            std_24h = 0.0
-            volatility_24h_pct = 0.0
-            zscore_24h = 0.0
-            if prices_24h:
-                arr24 = np.array(prices_24h, dtype=np.float64)
-                w24 = np.array(vols_24h, dtype=np.float64)
-                vwap_24h = float(np.average(arr24, weights=w24))
-                std_24h = float(np.std(arr24))
-                if vwap_24h > 0:
-                    volatility_24h_pct = (std_24h / vwap_24h) * 100.0
-                if mid_price and std_24h > 0:
-                    zscore_24h = (mid_price - vwap_24h) / std_24h
+            vwap_24h = cs.vwap_24h
+            std_24h = cs.std_24h
+            volatility_24h_pct = cs.volatility_24h_pct
+            zscore_24h = ((mid_price - vwap_24h) / std_24h) if (mid_price and vwap_24h and std_24h > 0) else 0.0
 
-            vwap_7d: Optional[float] = None
-            std_7d = 0.0
-            zscore_7d = 0.0
-            if prices_7d:
-                arr7 = np.array(prices_7d, dtype=np.float64)
-                w7 = np.array(vols_7d, dtype=np.float64)
-                vwap_7d = float(np.average(arr7, weights=w7))
-                std_7d = float(np.std(arr7))
-                if mid_price and std_7d > 0:
-                    zscore_7d = (mid_price - vwap_7d) / std_7d
-            else:
-                vwap_7d = vwap_24h
-                std_7d = std_24h
-                zscore_7d = zscore_24h
-            candles_1h_count = len(prices_7d)
+            vwap_7d = cs.vwap_7d
+            std_7d = cs.std_7d
+            zscore_7d = ((mid_price - vwap_7d) / std_7d) if (mid_price and vwap_7d and std_7d > 0) else 0.0
+            candles_1h_count = cs.candles_1h_count
 
-            # 7d percentile range for Overnight Flips (25th pct low -> 75th pct high)
-            p25_7d: Optional[int] = None
-            p75_7d: Optional[int] = None
-            min_7d: Optional[int] = None
-            max_7d: Optional[int] = None
-            if lows_7d and highs_7d:
-                arr_l = np.array(lows_7d, dtype=np.float64)
-                arr_h = np.array(highs_7d, dtype=np.float64)
-                p25_7d = int(round(float(np.percentile(arr_l, 25))))
-                p75_7d = int(round(float(np.percentile(arr_h, 75))))
-                min_7d = int(round(float(np.percentile(arr_l, 5))))
-                max_7d = int(round(float(np.percentile(arr_h, 95))))
-            elif prices_7d:
-                arr_p = np.array(prices_7d, dtype=np.float64)
-                p25_7d = int(round(float(np.percentile(arr_p, 25))))
-                p75_7d = int(round(float(np.percentile(arr_p, 75))))
-                min_7d = int(round(float(np.min(arr_p))))
-                max_7d = int(round(float(np.max(arr_p))))
+            seasonality_bias_pct = cs.seasonality_by_hour.get(current_hour_of_day, 0.0)
 
-            trend_7d_pct = (
-                ((vwap_24h - vwap_7d) / vwap_7d) * 100.0
-                if (vwap_24h and vwap_7d and vwap_7d > 0)
+            price_change_1h_pct = (
+                ((mid_price - cs.prev_1h_price) / cs.prev_1h_price) * 100.0
+                if (mid_price and cs.prev_1h_price and cs.prev_1h_price > 0)
+                else 0.0
+            )
+            price_change_24h_pct = (
+                ((mid_price - cs.oldest_24h_price) / cs.oldest_24h_price) * 100.0
+                if (mid_price and cs.oldest_24h_price and cs.oldest_24h_price > 0)
                 else 0.0
             )
 
-            # Hour-of-day seasonality bias (% deviation of this hour vs 7d VWAP)
-            seasonality_bias_pct = 0.0
-            if same_hour_prices and vwap_7d and vwap_7d > 0 and len(prices_7d) >= 36:
-                seasonality_bias_pct = ((float(np.mean(same_hour_prices)) - vwap_7d) / vwap_7d) * 100.0
-
-            # Price changes
-            price_change_1h_pct = 0.0
-            if mid_price and prev_1h_price and prev_1h_price > 0:
-                price_change_1h_pct = ((mid_price - prev_1h_price) / prev_1h_price) * 100.0
-
-            price_change_24h_pct = 0.0
-            if mid_price and oldest_24h_price and oldest_24h_price > 0:
-                price_change_24h_pct = ((mid_price - oldest_24h_price) / oldest_24h_price) * 100.0
-
-            # Volume spike ratio (current 5m vs 24h average 5m)
             avg_5m_vol = vol_24h / 288.0 if vol_24h > 0 else 0.0
             volume_spike_ratio = (vol_5m / avg_5m_vol) if avg_5m_vol >= 1.0 else (1.0 if vol_5m > 0 else 0.0)
 
-            # --- Actionable Buy/Sell prices & exact 2% GE tax ---
+            # Actionable Buy/Sell prices & exact 2% GE tax
             suggested_buy: Optional[int] = None
             suggested_sell: Optional[int] = None
             raw_margin = 0
@@ -487,7 +543,6 @@ class MarketState:
 
             if high and low and high > 0 and low > 0:
                 raw_margin = high - low
-                # Dynamic +/- 1 GP undercut when spread permits, slightly conservative under negative OFI
                 if raw_margin >= 4:
                     suggested_buy = low + 1
                     suggested_sell = high - 1
@@ -495,7 +550,6 @@ class MarketState:
                     suggested_buy = low
                     suggested_sell = high
 
-                # If order flow is heavily negative (dumping), don't aggressively overbid
                 if ofi_5m < -0.5 and raw_margin >= 10:
                     suggested_buy = low
 
@@ -507,12 +561,11 @@ class MarketState:
             eff_limit = buy_limit if buy_limit > 0 else 1
             max_profit_per_limit = net_margin * eff_limit if net_margin > 0 else 0
 
-            # --- Estimated fill time & GP/hr (for 1 limit) ---
-            capture_rate = 0.25  # Conservative 25% share of order flow
+            # Estimated fill time & GP/hr
             if eff_vol_1h_h > 0 and eff_vol_1h_l > 0 and eff_limit > 0:
-                buy_hrs = eff_limit / (eff_vol_1h_l * capture_rate)
-                sell_hrs = eff_limit / (eff_vol_1h_h * capture_rate)
-                est_cycle_hrs = max(buy_hrs + sell_hrs, 0.06)  # Min ~3.6 min realistic cycle
+                buy_hrs = eff_limit / (eff_vol_1h_l * 0.25)
+                sell_hrs = eff_limit / (eff_vol_1h_h * 0.25)
+                est_cycle_hrs = max(buy_hrs + sell_hrs, 0.06)
                 est_fill_min = min(est_cycle_hrs * 60.0, 1440.0)
             else:
                 est_cycle_hrs = 24.0
@@ -524,18 +577,16 @@ class MarketState:
                 else 0
             )
 
-            # Flip Sharpe (margin vs price volatility)
             flip_sharpe = (net_roi_pct / max(volatility_24h_pct, 0.35)) if net_roi_pct > 0 else 0.0
 
-            # High-Alch floor
-            alch_profit = (highalch - low - self.nature_rune_price) if (highalch > 0 and low and low > 0) else -999_999_999
+            alch_profit = (highalch - low - nature_price) if (highalch > 0 and low and low > 0) else -999_999_999
             alch_floor_pct: Optional[float] = None
             if highalch > 0 and low and low > 0:
-                alch_floor_val = highalch - self.nature_rune_price
+                alch_floor_val = highalch - nature_price
                 if alch_floor_val > 0:
                     alch_floor_pct = ((low - alch_floor_val) / low) * 100.0
 
-            # --- Anti-Trap & Manipulation Guard ---
+            # Anti-trap & manipulation guard
             flags: list[str] = []
             max_age = max(high_age or 999999, low_age or 999999)
             if max_age > 1800:
@@ -545,7 +596,6 @@ class MarketState:
             if vol_24h < 20 or eff_vol_1h_h == 0 or eff_vol_1h_l == 0:
                 flags.append("LOW_LIQUIDITY")
             if vwap_24h and vwap_24h > 0 and high and low:
-                # Flag wildly anomalous single-trade quote vs 24h VWAP
                 if abs(high - vwap_24h) / vwap_24h > 0.25 or abs(low - vwap_24h) / vwap_24h > 0.25:
                     flags.append("OUTLIER_SPREAD")
             if ofi_5m < -0.65 and price_change_1h_pct < -3.0:
@@ -553,7 +603,7 @@ class MarketState:
             if net_roi_pct > 35.0 and vol_24h < 200:
                 flags.append("THIN_MANIPULATION_RISK")
 
-            # --- Safety Score (0-100) ---
+            # Safety score (0-100)
             safety = 100
             if max_age > 300:
                 safety -= min(30, int((max_age - 300) / 120))
@@ -572,10 +622,10 @@ class MarketState:
             if "THIN_MANIPULATION_RISK" in flags:
                 safety -= 30
             if alch_floor_pct is not None and alch_floor_pct <= 3.0:
-                safety += 12  # Hard High-Alch floor bonus
+                safety += 12
             safety_score = int(_clamp(safety, 0, 100))
 
-            # --- Composite Strategy Scores (0-100) ---
+            # Composite Strategy Scores
             fast_flip_score = 0.0
             if net_margin > 0 and "INVERTED_SPREAD" not in flags and "LOW_LIQUIDITY" not in flags and max_age <= 1800:
                 roi_pts = _clamp(net_roi_pct * 8.0, 0, 28)
@@ -594,7 +644,7 @@ class MarketState:
                 profit_pts = _clamp(math.log10(max(max_profit_per_limit, 1)) * 8.0 - 25.0, 0, 38)
                 sharpe_pts = _clamp(flip_sharpe * 10.0, 0, 27)
                 roi_pts = _clamp(net_roi_pct * 4.5, 0, 20)
-                seasonal_pts = _clamp(-seasonality_bias_pct * 3.0, 0, 10)  # Bonus if historically cheap right now
+                seasonal_pts = _clamp(-seasonality_bias_pct * 3.0, 0, 10)
                 cap_bonus = 5.0 if (is_mega_rare_capped or is_tax_exempt) else 0.0
                 overnight_score = _clamp(
                     (profit_pts + sharpe_pts + roi_pts + seasonal_pts + cap_bonus) * (0.4 + 0.6 * safety_score / 100.0),
@@ -611,7 +661,6 @@ class MarketState:
             dump_conservative_target: Optional[int] = None
             dump_full_target: Optional[int] = None
 
-            # Use 24h hourly Z-score primarily for sudden panic shocks; compare against 7d trend to avoid bleeding downtrends
             if zscore_24h <= zscore_7d or candles_1h_count < 36:
                 ref_z = zscore_24h
                 dump_timeframe = "24h"
@@ -624,20 +673,11 @@ class MarketState:
             if base_vwap and base_vwap > 0 and low:
                 dump_baseline_vwap = int(round(base_vwap))
                 dump_drop_pct = ((low - base_vwap) / base_vwap) * 100.0
-
-                # Realistic targets:
-                # Conservative = 99% of min(24h VWAP, 7d VWAP) -> fast bounce back to today's normal level
-                # Full = 98.5% of 7d VWAP -> full weekly mean reversion
                 anchor_conservative = min(vwap_24h or base_vwap, vwap_7d or base_vwap)
                 dump_conservative_target = max(suggested_sell or 0, int(round(anchor_conservative * 0.99)))
                 dump_full_target = max(dump_conservative_target, int(round((vwap_7d or base_vwap) * 0.985)))
 
-                # Distinguish sudden panic dump (high bounce odds) from multi-day bleed (low bounce odds)
-                trend_7d_drift_pct = (
-                    ((vwap_24h - vwap_7d) / vwap_7d) * 100.0
-                    if (vwap_24h and vwap_7d and vwap_7d > 0)
-                    else 0.0
-                )
+                trend_7d_drift_pct = cs.trend_7d_pct
                 is_sudden_shock = zscore_24h <= -1.6 and trend_7d_drift_pct > -4.5
                 is_downtrend_bleed = trend_7d_drift_pct <= -5.0 and zscore_24h > -1.4
 
@@ -691,7 +731,12 @@ class MarketState:
                 roi_pts = _clamp(net_roi_pct * 8.0, 0, 25)
                 alch_floor_score = _clamp(floor_pts + gph_pts + roi_pts, 0.0, 100.0)
 
-            overall_score = max(fast_flip_score, overnight_score * 0.92, dump_sniper_score * 0.95, alch_floor_score * 0.9)
+            overall_score = max(
+                fast_flip_score,
+                overnight_score * 0.92,
+                dump_sniper_score * 0.95,
+                alch_floor_score * 0.9,
+            )
 
             new_metrics[item_id] = ItemMetrics(
                 id=item_id,
@@ -726,8 +771,8 @@ class MarketState:
                 vol_24h_high=vol_24h_h,
                 vol_24h_low=vol_24h_l,
                 vol_24h=vol_24h,
-                avg_high_1h=avg_high_1h,
-                avg_low_1h=avg_low_1h,
+                avg_high_1h=cs.avg_high_1h,
+                avg_low_1h=cs.avg_low_1h,
                 ofi_5m=ofi_5m,
                 ofi_1h=ofi_1h,
                 ofi_24h=ofi_24h,
@@ -743,11 +788,11 @@ class MarketState:
                 price_change_24h_pct=price_change_24h_pct,
                 volume_spike_ratio=volume_spike_ratio,
                 seasonality_bias_pct=seasonality_bias_pct,
-                p25_7d=p25_7d,
-                p75_7d=p75_7d,
-                min_7d=min_7d,
-                max_7d=max_7d,
-                trend_7d_pct=trend_7d_pct,
+                p25_7d=cs.p25_7d,
+                p75_7d=cs.p75_7d,
+                min_7d=cs.min_7d,
+                max_7d=cs.max_7d,
+                trend_7d_pct=cs.trend_7d_pct,
                 dump_timeframe=dump_timeframe,
                 dump_baseline_vwap=dump_baseline_vwap,
                 dump_drop_pct=dump_drop_pct,

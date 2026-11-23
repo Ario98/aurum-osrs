@@ -34,7 +34,7 @@ DOMAIN=flip.yourdomain.com
 APP_PASSWORD=choose-a-strong-password
 SESSION_SECRET=$(openssl rand -hex 32)
 DINK_WEBHOOK_TOKEN=$(openssl rand -hex 24)
-WIKI_USER_AGENT="osrs-flip-terminal/2.0 - private trading dashboard - @ario0446 on Discord"
+WIKI_USER_AGENT="osrs-flip-terminal/2.0 - your-contact-here"
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 

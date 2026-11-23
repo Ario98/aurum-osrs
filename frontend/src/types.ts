@@ -376,3 +376,26 @@ export interface OvernightResponse {
   };
   flips: OvernightFlip[];
 }
+
+export interface WatchlistItem {
+  item_id: number;
+  item_name: string;
+  icon: string;
+  buy_below: number | null;
+  sell_above: number | null;
+  min_net_margin: number | null;
+  discord_notify: boolean;
+  notes: string;
+  created_at: number;
+  updated_at: number;
+  high: number | null;
+  low: number | null;
+  net_margin: number;
+  net_roi_pct: number;
+  vol_1h: number;
+  vol_24h: number;
+  zscore_7d: number;
+  safety_score: number;
+  is_tax_exempt: boolean;
+  triggered: string[];
+}

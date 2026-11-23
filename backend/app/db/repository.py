@@ -544,3 +544,140 @@ class Repository:
             d["discord_sent"] = bool(d["discord_sent"])
             results.append(d)
         return results
+
+    # ------------------------------------------------------------------
+    # Daily 24h Rollup & 30-Day Seasonality Queries
+    # ------------------------------------------------------------------
+    async def rollup_candles_24h(self) -> int:
+        """Roll up completed UTC days from candles_1h into permanent candles_24h."""
+        today_start = (int(time.time()) // 86400) * 86400
+        async with self.db.write_lock:
+            cur = await self.db.conn.execute(
+                """
+                INSERT INTO candles_24h (item_id, ts, avg_high, avg_low, high_vol, low_vol)
+                SELECT
+                    item_id,
+                    (ts / 86400) * 86400 AS day_ts,
+                    CAST(ROUND(AVG(avg_high)) AS INTEGER) AS avg_high,
+                    CAST(ROUND(AVG(avg_low)) AS INTEGER) AS avg_low,
+                    SUM(high_vol) AS high_vol,
+                    SUM(low_vol) AS low_vol
+                FROM candles_1h
+                WHERE ts < ?
+                GROUP BY item_id, day_ts
+                ON CONFLICT(item_id, ts) DO UPDATE SET
+                    avg_high = excluded.avg_high,
+                    avg_low = excluded.avg_low,
+                    high_vol = excluded.high_vol,
+                    low_vol = excluded.low_vol
+                """,
+                (today_start,),
+            )
+            await self.db.conn.commit()
+            return cur.rowcount or 0
+
+    async def compute_30d_hour_seasonality(self) -> dict[int, dict[int, float]]:
+        """Compute multi-week hour-of-day price bias (%) per item directly in SQLite."""
+        since_ts = int(time.time()) - 30 * 86400
+        async with self.db.conn.execute(
+            """
+            SELECT
+                item_id,
+                (ts / 3600) % 24 AS hr,
+                AVG(COALESCE((avg_high + avg_low) / 2.0, avg_high, avg_low)) AS avg_mid,
+                COUNT(*) AS cnt
+            FROM candles_1h
+            WHERE ts >= ? AND (avg_high IS NOT NULL OR avg_low IS NOT NULL)
+            GROUP BY item_id, hr
+            HAVING cnt >= 3
+            """,
+            (since_ts,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        per_item: dict[int, dict[int, float]] = {}
+        for r in rows:
+            if r[2] is None or float(r[2]) <= 0:
+                continue
+            per_item.setdefault(int(r[0]), {})[int(r[1])] = float(r[2])
+
+        biases: dict[int, dict[int, float]] = {}
+        for item_id, hr_map in per_item.items():
+            if len(hr_map) < 6:
+                continue
+            overall = sum(hr_map.values()) / len(hr_map)
+            if overall <= 0:
+                continue
+            biases[item_id] = {
+                hr: ((val - overall) / overall) * 100.0 for hr, val in hr_map.items()
+            }
+        return biases
+
+    # ------------------------------------------------------------------
+    # Personal Watchlist & Custom Price/Margin Alerts
+    # ------------------------------------------------------------------
+    async def get_watchlist(self) -> list[dict[str, Any]]:
+        async with self.db.conn.execute(
+            "SELECT * FROM watchlist ORDER BY updated_at DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["discord_notify"] = bool(d["discord_notify"])
+            results.append(d)
+        return results
+
+    async def upsert_watchlist_item(
+        self,
+        item_id: int,
+        item_name: str,
+        buy_below: Optional[int] = None,
+        sell_above: Optional[int] = None,
+        min_net_margin: Optional[int] = None,
+        discord_notify: bool = True,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        now = int(time.time())
+        async with self.db.write_lock:
+            await self.db.conn.execute(
+                """
+                INSERT INTO watchlist (
+                    item_id, item_name, buy_below, sell_above, min_net_margin,
+                    discord_notify, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_id) DO UPDATE SET
+                    item_name = excluded.item_name,
+                    buy_below = excluded.buy_below,
+                    sell_above = excluded.sell_above,
+                    min_net_margin = excluded.min_net_margin,
+                    discord_notify = excluded.discord_notify,
+                    notes = excluded.notes,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    item_id,
+                    item_name,
+                    buy_below,
+                    sell_above,
+                    min_net_margin,
+                    1 if discord_notify else 0,
+                    notes,
+                    now,
+                    now,
+                ),
+            )
+            await self.db.conn.commit()
+        async with self.db.conn.execute("SELECT * FROM watchlist WHERE item_id = ?", (item_id,)) as cur:
+            row = await cur.fetchone()
+        assert row is not None
+        d = dict(row)
+        d["discord_notify"] = bool(d["discord_notify"])
+        return d
+
+    async def delete_watchlist_item(self, item_id: int) -> bool:
+        async with self.db.write_lock:
+            cur = await self.db.conn.execute("DELETE FROM watchlist WHERE item_id = ?", (item_id,))
+            await self.db.conn.commit()
+            return (cur.rowcount or 0) > 0
