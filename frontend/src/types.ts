@@ -1,4 +1,5 @@
 export type StrategyMode = 'auto_mix' | 'fast_flip' | 'overnight' | 'dump_sniper' | 'alch_floor';
+export type OvernightStyle = 'balanced' | 'safe' | 'high_margin';
 export type ScannerPreset = 'all' | 'fast_flip' | 'overnight' | 'dump_sniper' | 'alch_floor' | 'tax_exempt' | 'mega_rares';
 
 export interface MarketStatus {
@@ -322,4 +323,55 @@ export interface ChartPoint {
   avgLowPrice: number | null;
   highPriceVolume: number;
   lowPriceVolume: number;
+}
+
+export interface OvernightFlip {
+  item_id: number;
+  item_name: string;
+  icon: string;
+  members: boolean;
+  buy_price: number;
+  sell_price: number;
+  live_low: number;
+  live_high: number;
+  quantity: number;
+  buy_limit: number;
+  capital_required: number;
+  tax_per_unit: number;
+  total_tax: number;
+  net_margin_unit: number;
+  est_net_profit: number;
+  net_roi_pct: number;
+  est_8h_volume: number;
+  vol_24h: number;
+  vol_24h_high: number;
+  vol_24h_low: number;
+  fill_confidence: 'HIGH' | 'MEDIUM' | 'PATIENT';
+  overnight_risk: 'LOW' | 'MODERATE' | 'SWING';
+  alch_protected: boolean;
+  is_tax_exempt: boolean;
+  is_mega_rare_capped: boolean;
+  safety_score: number;
+  trend_7d_pct: number;
+  volatility_24h_pct: number;
+  min_7d: number;
+  p25_7d: number;
+  p75_7d: number;
+  max_7d: number;
+  score: number;
+  reason: string;
+}
+
+export interface OvernightResponse {
+  cash_stack: number;
+  slots: number;
+  style: OvernightStyle;
+  members: boolean;
+  summary: {
+    allocated_capital: number;
+    est_overnight_profit: number;
+    avg_roi_pct: number;
+    picks_count: number;
+  };
+  flips: OvernightFlip[];
 }

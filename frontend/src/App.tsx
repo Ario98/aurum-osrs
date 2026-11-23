@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Lock,
   LogOut,
+  Moon,
   Search,
   Settings as SettingsIcon,
   Volume2,
@@ -20,12 +21,14 @@ import { useMarketSocket } from './hooks/useMarketSocket';
 import { Arbitrage } from './pages/Arbitrage';
 import { CommandCenter } from './pages/CommandCenter';
 import { Journal } from './pages/Journal';
+import { Overnight } from './pages/Overnight';
 import { Scanner } from './pages/Scanner';
 import { Settings } from './pages/Settings';
 import type {
   ActiveSlot,
   AlertItem,
   MarketStatus,
+  OvernightFlip,
   StrategyMode,
   TradeCall,
   TradeCallsResponse,
@@ -33,7 +36,7 @@ import type {
 } from './types';
 import { playAlertChime } from './utils/format';
 
-type NavTab = 'command' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
+type NavTab = 'command' | 'overnight' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
 
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -198,6 +201,18 @@ export default function App() {
     await refreshSlots();
   };
 
+  const handleStartOvernightFlip = async (flip: OvernightFlip) => {
+    await api.startSlot({
+      item_id: flip.item_id,
+      item_name: flip.item_name,
+      status: 'BUYING',
+      quantity: flip.quantity,
+      buy_price: flip.buy_price,
+      target_sell_price: flip.sell_price,
+    });
+    await refreshSlots();
+  };
+
   const handleSettingsSaved = (s: UserSettings) => {
     setCashStack(s.cash_stack);
     setMembers(s.members);
@@ -252,6 +267,7 @@ export default function App() {
 
   const navItems: { key: NavTab; label: string; icon: React.ReactNode }[] = [
     { key: 'command', label: 'Command Center', icon: <Zap className="h-3.5 w-3.5" /> },
+    { key: 'overnight', label: 'Overnight', icon: <Moon className="h-3.5 w-3.5" /> },
     { key: 'scanner', label: 'Scanner (4.6k)', icon: <Search className="h-3.5 w-3.5" /> },
     { key: 'arbitrage', label: 'Arbitrage', icon: <FlaskConical className="h-3.5 w-3.5" /> },
     { key: 'journal', label: 'Journal & Limits', icon: <BookOpen className="h-3.5 w-3.5" /> },
@@ -389,6 +405,22 @@ export default function App() {
               await api.deleteSlot(slotNum);
               await refreshSlots();
             }}
+            onOpenChart={setSelectedItemId}
+          />
+        )}
+
+        {activeTab === 'overnight' && (
+          <Overnight
+            cashStack={cashStack}
+            onChangeCashStack={(val) => {
+              setCashStack(val);
+              api.saveSettings({ cash_stack: val }).catch(() => {});
+            }}
+            members={members}
+            slotsFull={slots.length >= 8}
+            tickVersion={tickVersion}
+            slotsVersion={slotsVersion}
+            onStartOvernight={handleStartOvernightFlip}
             onOpenChart={setSelectedItemId}
           />
         )}

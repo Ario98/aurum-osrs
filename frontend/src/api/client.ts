@@ -6,6 +6,8 @@ import type {
   ItemMetrics,
   JournalResponse,
   MarketStatus,
+  OvernightResponse,
+  OvernightStyle,
   ScannerPreset,
   StrategyMode,
   TradeCallsResponse,
@@ -63,6 +65,21 @@ export const api = {
     if (params.min_safety !== undefined) q.set('min_safety', String(params.min_safety));
     if (params.count !== undefined) q.set('count', String(params.count));
     return request<TradeCallsResponse>(`/api/market/trade-calls?${q.toString()}`);
+  },
+  overnightFlips: (params: {
+    cash_stack: number;
+    slots: number;
+    style: OvernightStyle;
+    members: boolean;
+    count?: number;
+  }) => {
+    const q = new URLSearchParams();
+    q.set('cash_stack', String(params.cash_stack));
+    q.set('slots', String(params.slots));
+    q.set('style', params.style);
+    q.set('members', String(params.members));
+    if (params.count !== undefined) q.set('count', String(params.count));
+    return request<OvernightResponse>(`/api/market/overnight?${q.toString()}`);
   },
   scanner: (params: {
     q?: string;

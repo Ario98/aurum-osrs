@@ -8,7 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import require_auth
-from app.engine.strategies import generate_trade_calls
+from app.engine.strategies import generate_overnight_flips, generate_trade_calls
 
 router = APIRouter(prefix="/api/market", tags=["market"], dependencies=[Depends(require_auth)])
 
@@ -82,6 +82,58 @@ async def get_trade_calls(
             "est_combined_gp_per_hour": total_est_gp_hr,
         },
         "calls": calls,
+    }
+
+
+@router.get("/overnight")
+async def get_overnight_flips(
+    request: Request,
+    cash_stack: Optional[int] = Query(default=None, ge=10_000),
+    slots: int = Query(default=8, ge=1, le=8),
+    style: str = Query(default="balanced", pattern="^(balanced|safe|high_margin)$"),
+    members: Optional[bool] = Query(default=None),
+    count: int = Query(default=16, ge=1, le=40),
+) -> dict[str, Any]:
+    state = request.app.state.market_state
+    repo = request.app.state.repo
+    settings = request.app.state.settings
+    saved = await repo.get_all_settings()
+
+    eff_cash = cash_stack if cash_stack is not None else int(saved.get("cash_stack", settings.default_cash_stack))
+    eff_members = members if members is not None else bool(saved.get("members", settings.default_members))
+
+    active_slots = await repo.get_active_slots()
+    exclude_ids = {int(s["item_id"]) for s in active_slots}
+    limits = await repo.get_active_buy_limits()
+    buy_limit_used = {int(l["item_id"]): int(l["quantity_bought"]) for l in limits}
+
+    flips = generate_overnight_flips(
+        state=state,
+        cash_stack=eff_cash,
+        slots=slots,
+        style=style,
+        members=eff_members,
+        exclude_item_ids=exclude_ids,
+        buy_limit_used=buy_limit_used,
+        count=count,
+    )
+    planned = flips[:slots]
+    total_capital = sum(f["capital_required"] for f in planned)
+    total_profit = sum(f["est_net_profit"] for f in planned)
+    avg_roi = (total_profit / total_capital * 100.0) if total_capital > 0 else 0.0
+
+    return {
+        "cash_stack": eff_cash,
+        "slots": slots,
+        "style": style,
+        "members": eff_members,
+        "summary": {
+            "allocated_capital": total_capital,
+            "est_overnight_profit": total_profit,
+            "avg_roi_pct": round(avg_roi, 2),
+            "picks_count": len(flips),
+        },
+        "flips": flips,
     }
 
 

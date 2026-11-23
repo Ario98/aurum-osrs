@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from app.engine.arbitrage import scan_item_sets, scan_potion_decanting
 from app.engine.coach import evaluate_slot
 from app.engine.state import MarketState
-from app.engine.strategies import generate_trade_calls
+from app.engine.strategies import generate_overnight_flips, generate_trade_calls
 from app.engine.tax import calculate_ge_tax, calculate_net_flip, is_tax_exempt_name
 
 
@@ -137,6 +137,11 @@ def test_metrics_and_trade_calls():
 
     f2p_calls = generate_trade_calls(state, cash_stack=10_000_000, free_slots=4, mode="auto_mix", members=False)
     assert all(not c["members"] for c in f2p_calls)
+
+    # Dedicated overnight flips anchored to 7d hourly percentile band
+    overnight = generate_overnight_flips(state, cash_stack=25_000_000, slots=8, style="balanced", members=True)
+    assert len(overnight) > 0
+    assert all(f["est_net_profit"] > 0 and f["p25_7d"] <= f["p75_7d"] for f in overnight)
 
 
 def test_arbitrage_decanting_and_sets():

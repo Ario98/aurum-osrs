@@ -85,6 +85,13 @@ class ItemMetrics:
     volume_spike_ratio: float
     seasonality_bias_pct: float
 
+    # Overnight / 7-day range & stability metrics
+    p25_7d: Optional[int]
+    p75_7d: Optional[int]
+    min_7d: Optional[int]
+    max_7d: Optional[int]
+    trend_7d_pct: float
+
     # Dump sniper transparency & bounce quality
     dump_timeframe: str
     dump_baseline_vwap: Optional[int]
@@ -161,6 +168,11 @@ class ItemMetrics:
             "price_change_24h_pct": round(self.price_change_24h_pct, 2),
             "volume_spike_ratio": round(self.volume_spike_ratio, 2),
             "seasonality_bias_pct": round(self.seasonality_bias_pct, 2),
+            "p25_7d": self.p25_7d,
+            "p75_7d": self.p75_7d,
+            "min_7d": self.min_7d,
+            "max_7d": self.max_7d,
+            "trend_7d_pct": round(self.trend_7d_pct, 2),
             "dump_timeframe": self.dump_timeframe,
             "dump_baseline_vwap": self.dump_baseline_vwap,
             "dump_drop_pct": round(self.dump_drop_pct, 2),
@@ -332,6 +344,8 @@ class MarketState:
             vols_24h: list[int] = []
             prices_7d: list[float] = []
             vols_7d: list[int] = []
+            highs_7d: list[int] = []
+            lows_7d: list[int] = []
             same_hour_prices: list[float] = []
             oldest_24h_price: Optional[float] = None
             prev_1h_price: Optional[float] = None
@@ -361,6 +375,10 @@ class MarketState:
                     if bucket_mid is not None:
                         prices_7d.append(bucket_mid)
                         vols_7d.append(max(tot_v, 1))
+                        if ah:
+                            highs_7d.append(ah)
+                        if al:
+                            lows_7d.append(al)
                         bucket_hour = (ts // 3600) % 24
                         if bucket_hour == current_hour_of_day:
                             same_hour_prices.append(bucket_mid)
@@ -414,6 +432,31 @@ class MarketState:
                 std_7d = std_24h
                 zscore_7d = zscore_24h
             candles_1h_count = len(prices_7d)
+
+            # 7d percentile range for Overnight Flips (25th pct low -> 75th pct high)
+            p25_7d: Optional[int] = None
+            p75_7d: Optional[int] = None
+            min_7d: Optional[int] = None
+            max_7d: Optional[int] = None
+            if lows_7d and highs_7d:
+                arr_l = np.array(lows_7d, dtype=np.float64)
+                arr_h = np.array(highs_7d, dtype=np.float64)
+                p25_7d = int(round(float(np.percentile(arr_l, 25))))
+                p75_7d = int(round(float(np.percentile(arr_h, 75))))
+                min_7d = int(round(float(np.percentile(arr_l, 5))))
+                max_7d = int(round(float(np.percentile(arr_h, 95))))
+            elif prices_7d:
+                arr_p = np.array(prices_7d, dtype=np.float64)
+                p25_7d = int(round(float(np.percentile(arr_p, 25))))
+                p75_7d = int(round(float(np.percentile(arr_p, 75))))
+                min_7d = int(round(float(np.min(arr_p))))
+                max_7d = int(round(float(np.max(arr_p))))
+
+            trend_7d_pct = (
+                ((vwap_24h - vwap_7d) / vwap_7d) * 100.0
+                if (vwap_24h and vwap_7d and vwap_7d > 0)
+                else 0.0
+            )
 
             # Hour-of-day seasonality bias (% deviation of this hour vs 7d VWAP)
             seasonality_bias_pct = 0.0
@@ -700,6 +743,11 @@ class MarketState:
                 price_change_24h_pct=price_change_24h_pct,
                 volume_spike_ratio=volume_spike_ratio,
                 seasonality_bias_pct=seasonality_bias_pct,
+                p25_7d=p25_7d,
+                p75_7d=p75_7d,
+                min_7d=min_7d,
+                max_7d=max_7d,
+                trend_7d_pct=trend_7d_pct,
                 dump_timeframe=dump_timeframe,
                 dump_baseline_vwap=dump_baseline_vwap,
                 dump_drop_pct=dump_drop_pct,
