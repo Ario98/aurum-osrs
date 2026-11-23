@@ -229,7 +229,14 @@ export function Scanner({ members, tickVersion, onOpenChart }: Props) {
                     {item.net_roi_pct.toFixed(1)}%
                   </div>
                   <div className="text-right font-medium text-zinc-200">{formatGp(item.max_profit_per_limit, true)}</div>
-                  <div className="text-right text-zinc-400">{item.vol_24h.toLocaleString()}</div>
+                  <div className="text-right">
+                    <div className="text-zinc-200 font-medium">{item.vol_24h.toLocaleString()}</div>
+                    <div className="text-[10px]">
+                      <span className="text-emerald-400">↑{formatGp(item.vol_24h_high, true)}</span>
+                      <span className="text-zinc-700"> / </span>
+                      <span className="text-rose-400">↓{formatGp(item.vol_24h_low, true)}</span>
+                    </div>
+                  </div>
                   <div className="text-right text-[11px]">
                     <span className={item.ofi_1h >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                       {item.ofi_1h >= 0 ? '+' : ''}

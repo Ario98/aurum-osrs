@@ -44,13 +44,28 @@ export interface TradeCall {
   is_tax_exempt: boolean;
   is_mega_rare_capped: boolean;
   ofi_1h: number;
+  zscore_24h?: number;
   zscore_7d: number;
   vol_1h: number;
+  vol_1h_high?: number;
+  vol_1h_low?: number;
   vol_24h: number;
+  vol_24h_high?: number;
+  vol_24h_low?: number;
   high_age_sec: number | null;
   low_age_sec: number | null;
   reason: string;
   manipulation_flags: string[];
+  dump_details?: {
+    timeframe: string;
+    baseline_vwap: number | null;
+    drop_pct: number;
+    bounce_outlook: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+    bounce_reason: string;
+    conservative_target: number | null;
+    full_target: number | null;
+    target_basis: string;
+  };
 }
 
 export interface TradeCallsResponse {
@@ -107,6 +122,9 @@ export interface ItemMetrics {
   ofi_24h: number;
   vwap_24h: number | null;
   vwap_7d: number | null;
+  std_24h?: number;
+  std_7d?: number;
+  candles_1h_count?: number;
   volatility_24h_pct: number;
   zscore_24h: number;
   zscore_7d: number;
@@ -114,6 +132,13 @@ export interface ItemMetrics {
   price_change_24h_pct: number;
   volume_spike_ratio: number;
   seasonality_bias_pct: number;
+  dump_timeframe?: string;
+  dump_baseline_vwap?: number | null;
+  dump_drop_pct?: number;
+  dump_bounce_outlook?: 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+  dump_bounce_reason?: string;
+  dump_conservative_target?: number | null;
+  dump_full_target?: number | null;
   est_fill_minutes_limit: number;
   est_gp_per_hour_limit: number;
   flip_sharpe: number;

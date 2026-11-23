@@ -74,6 +74,9 @@ class ItemMetrics:
     # Trend, volatility, mean-reversion & seasonality
     vwap_24h: Optional[float]
     vwap_7d: Optional[float]
+    std_24h: float
+    std_7d: float
+    candles_1h_count: int
     volatility_24h_pct: float
     zscore_24h: float
     zscore_7d: float
@@ -81,6 +84,15 @@ class ItemMetrics:
     price_change_24h_pct: float
     volume_spike_ratio: float
     seasonality_bias_pct: float
+
+    # Dump sniper transparency & bounce quality
+    dump_timeframe: str
+    dump_baseline_vwap: Optional[int]
+    dump_drop_pct: float
+    dump_bounce_outlook: str  # HIGH | MEDIUM | LOW | NONE
+    dump_bounce_reason: str
+    dump_conservative_target: Optional[int]
+    dump_full_target: Optional[int]
 
     # Liquidity, safety & alch floor
     est_fill_minutes_limit: float
@@ -139,6 +151,9 @@ class ItemMetrics:
             "ofi_24h": round(self.ofi_24h, 3),
             "vwap_24h": round(self.vwap_24h, 1) if self.vwap_24h is not None else None,
             "vwap_7d": round(self.vwap_7d, 1) if self.vwap_7d is not None else None,
+            "std_24h": round(self.std_24h, 1),
+            "std_7d": round(self.std_7d, 1),
+            "candles_1h_count": self.candles_1h_count,
             "volatility_24h_pct": round(self.volatility_24h_pct, 2),
             "zscore_24h": round(self.zscore_24h, 2),
             "zscore_7d": round(self.zscore_7d, 2),
@@ -146,6 +161,13 @@ class ItemMetrics:
             "price_change_24h_pct": round(self.price_change_24h_pct, 2),
             "volume_spike_ratio": round(self.volume_spike_ratio, 2),
             "seasonality_bias_pct": round(self.seasonality_bias_pct, 2),
+            "dump_timeframe": self.dump_timeframe,
+            "dump_baseline_vwap": self.dump_baseline_vwap,
+            "dump_drop_pct": round(self.dump_drop_pct, 2),
+            "dump_bounce_outlook": self.dump_bounce_outlook,
+            "dump_bounce_reason": self.dump_bounce_reason,
+            "dump_conservative_target": self.dump_conservative_target,
+            "dump_full_target": self.dump_full_target,
             "est_fill_minutes_limit": round(self.est_fill_minutes_limit, 1),
             "est_gp_per_hour_limit": self.est_gp_per_hour_limit,
             "flip_sharpe": round(self.flip_sharpe, 2),
@@ -362,32 +384,36 @@ class MarketState:
             ofi_1h = _ofi(eff_vol_1h_h, eff_vol_1h_l)
             ofi_24h = _ofi(vol_24h_h, vol_24h_l)
 
-            # VWAP, Volatility & Z-Scores
+            # VWAP, Volatility & Z-Scores (calculated across hourly 1h candles)
             vwap_24h: Optional[float] = None
+            std_24h = 0.0
             volatility_24h_pct = 0.0
             zscore_24h = 0.0
             if prices_24h:
                 arr24 = np.array(prices_24h, dtype=np.float64)
                 w24 = np.array(vols_24h, dtype=np.float64)
                 vwap_24h = float(np.average(arr24, weights=w24))
-                std24 = float(np.std(arr24))
+                std_24h = float(np.std(arr24))
                 if vwap_24h > 0:
-                    volatility_24h_pct = (std24 / vwap_24h) * 100.0
-                if mid_price and std24 > 0:
-                    zscore_24h = (mid_price - vwap_24h) / std24
+                    volatility_24h_pct = (std_24h / vwap_24h) * 100.0
+                if mid_price and std_24h > 0:
+                    zscore_24h = (mid_price - vwap_24h) / std_24h
 
             vwap_7d: Optional[float] = None
+            std_7d = 0.0
             zscore_7d = 0.0
             if prices_7d:
                 arr7 = np.array(prices_7d, dtype=np.float64)
                 w7 = np.array(vols_7d, dtype=np.float64)
                 vwap_7d = float(np.average(arr7, weights=w7))
-                std7 = float(np.std(arr7))
-                if mid_price and std7 > 0:
-                    zscore_7d = (mid_price - vwap_7d) / std7
+                std_7d = float(np.std(arr7))
+                if mid_price and std_7d > 0:
+                    zscore_7d = (mid_price - vwap_7d) / std_7d
             else:
                 vwap_7d = vwap_24h
+                std_7d = std_24h
                 zscore_7d = zscore_24h
+            candles_1h_count = len(prices_7d)
 
             # Hour-of-day seasonality bias (% deviation of this hour vs 7d VWAP)
             seasonality_bias_pct = 0.0
@@ -534,25 +560,80 @@ class MarketState:
                 )
 
             dump_sniper_score = 0.0
-            ref_z = min(zscore_24h, zscore_7d)
-            if (
-                low
-                and vwap_7d
-                and vwap_7d > 0
-                and ref_z <= -1.6
-                and vol_24h >= 150
-                and (low_age or 99999) <= 900
-            ):
-                rebound_target = int(vwap_7d * 0.985)
-                rebound_tax = calculate_ge_tax(rebound_target, item_name=name, exempt=is_tax_exempt)
-                rebound_net = rebound_target - low - rebound_tax
-                if rebound_net > 0:
-                    z_pts = _clamp((-ref_z - 1.5) * 22.0, 0, 45)
-                    spike_pts = _clamp(volume_spike_ratio * 8.0, 0, 25)
-                    rebound_roi = (rebound_net / low) * 100.0
-                    roi_pts = _clamp(rebound_roi * 5.0, 0, 20)
-                    liq_pts = _clamp(math.log10(max(vol_24h, 1)) * 2.5, 0, 10)
-                    dump_sniper_score = _clamp(z_pts + spike_pts + roi_pts + liq_pts, 0.0, 100.0)
+            dump_timeframe = "24h"
+            dump_baseline_vwap: Optional[int] = int(round(vwap_24h)) if vwap_24h else None
+            dump_drop_pct = 0.0
+            dump_bounce_outlook = "NONE"
+            dump_bounce_reason = "Trading within normal hourly range."
+            dump_conservative_target: Optional[int] = None
+            dump_full_target: Optional[int] = None
+
+            # Use 24h hourly Z-score primarily for sudden panic shocks; compare against 7d trend to avoid bleeding downtrends
+            if zscore_24h <= zscore_7d or candles_1h_count < 36:
+                ref_z = zscore_24h
+                dump_timeframe = "24h"
+                base_vwap = vwap_24h
+            else:
+                ref_z = zscore_7d
+                dump_timeframe = "7d"
+                base_vwap = vwap_7d
+
+            if base_vwap and base_vwap > 0 and low:
+                dump_baseline_vwap = int(round(base_vwap))
+                dump_drop_pct = ((low - base_vwap) / base_vwap) * 100.0
+
+                # Realistic targets:
+                # Conservative = 99% of min(24h VWAP, 7d VWAP) -> fast bounce back to today's normal level
+                # Full = 98.5% of 7d VWAP -> full weekly mean reversion
+                anchor_conservative = min(vwap_24h or base_vwap, vwap_7d or base_vwap)
+                dump_conservative_target = max(suggested_sell or 0, int(round(anchor_conservative * 0.99)))
+                dump_full_target = max(dump_conservative_target, int(round((vwap_7d or base_vwap) * 0.985)))
+
+                # Distinguish sudden panic dump (high bounce odds) from multi-day bleed (low bounce odds)
+                trend_7d_drift_pct = (
+                    ((vwap_24h - vwap_7d) / vwap_7d) * 100.0
+                    if (vwap_24h and vwap_7d and vwap_7d > 0)
+                    else 0.0
+                )
+                is_sudden_shock = zscore_24h <= -1.6 and trend_7d_drift_pct > -4.5
+                is_downtrend_bleed = trend_7d_drift_pct <= -5.0 and zscore_24h > -1.4
+
+                if ref_z <= -1.6 and vol_24h >= 150 and (low_age or 99999) <= 900:
+                    rebound_tax = calculate_ge_tax(
+                        dump_conservative_target, item_name=name, exempt=is_tax_exempt
+                    )
+                    rebound_net = dump_conservative_target - low - rebound_tax
+                    if rebound_net > 0:
+                        if is_sudden_shock and (volume_spike_ratio >= 1.5 or zscore_24h <= -2.2):
+                            dump_bounce_outlook = "HIGH"
+                            dump_bounce_reason = (
+                                f"Sudden drop ({dump_drop_pct:.1f}% vs 24h hourly VWAP) while 7d trend is stable "
+                                f"({trend_7d_drift_pct:+.1f}%). Strong mean-reversion bounce setup."
+                            )
+                            trend_mult = 1.0
+                        elif is_downtrend_bleed:
+                            dump_bounce_outlook = "LOW"
+                            dump_bounce_reason = (
+                                f"Multi-day downtrend (24h avg is {trend_7d_drift_pct:.1f}% below 7d avg). "
+                                "Could keep bleeding — wait for buy volume before entering."
+                            )
+                            trend_mult = 0.55
+                        else:
+                            dump_bounce_outlook = "MEDIUM"
+                            dump_bounce_reason = (
+                                f"Trading {abs(ref_z):.1f}σ below {dump_timeframe} hourly VWAP "
+                                f"({dump_drop_pct:.1f}%). Watch for instant-buy volume to confirm bounce."
+                            )
+                            trend_mult = 0.85
+
+                        z_pts = _clamp((-ref_z - 1.5) * 22.0, 0, 45)
+                        spike_pts = _clamp(volume_spike_ratio * 8.0, 0, 25)
+                        rebound_roi = (rebound_net / low) * 100.0
+                        roi_pts = _clamp(rebound_roi * 5.0, 0, 20)
+                        liq_pts = _clamp(math.log10(max(vol_24h, 1)) * 2.5, 0, 10)
+                        dump_sniper_score = _clamp(
+                            (z_pts + spike_pts + roi_pts + liq_pts) * trend_mult, 0.0, 100.0
+                        )
 
             alch_floor_score = 0.0
             if (
@@ -609,6 +690,9 @@ class MarketState:
                 ofi_24h=ofi_24h,
                 vwap_24h=vwap_24h,
                 vwap_7d=vwap_7d,
+                std_24h=std_24h,
+                std_7d=std_7d,
+                candles_1h_count=candles_1h_count,
                 volatility_24h_pct=volatility_24h_pct,
                 zscore_24h=zscore_24h,
                 zscore_7d=zscore_7d,
@@ -616,6 +700,13 @@ class MarketState:
                 price_change_24h_pct=price_change_24h_pct,
                 volume_spike_ratio=volume_spike_ratio,
                 seasonality_bias_pct=seasonality_bias_pct,
+                dump_timeframe=dump_timeframe,
+                dump_baseline_vwap=dump_baseline_vwap,
+                dump_drop_pct=dump_drop_pct,
+                dump_bounce_outlook=dump_bounce_outlook,
+                dump_bounce_reason=dump_bounce_reason,
+                dump_conservative_target=dump_conservative_target,
+                dump_full_target=dump_full_target,
                 est_fill_minutes_limit=est_fill_min,
                 est_gp_per_hour_limit=est_gp_per_hour_limit,
                 flip_sharpe=flip_sharpe,

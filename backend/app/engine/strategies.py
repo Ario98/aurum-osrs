@@ -79,13 +79,16 @@ def generate_trade_calls(
             score = m.overnight_score
             reason_parts.append("High margin per 4h limit")
         elif mode == "dump_sniper":
-            if m.dump_sniper_score < 25 or not m.vwap_7d or not m.low or m.vol_1h < 2:
+            if m.dump_sniper_score < 25 or not m.dump_conservative_target or not m.low or m.vol_1h < 2:
                 continue
             strategy_tag = "dump_sniper"
             buy_price = m.low
-            sell_price = max(m.suggested_sell, int(m.vwap_7d * 0.985))
+            sell_price = m.dump_conservative_target
             score = m.dump_sniper_score
-            reason_parts.append(f"Panic dump ({min(m.zscore_24h, m.zscore_7d):.1f}σ below VWAP)")
+            ref_z = m.zscore_24h if m.dump_timeframe == "24h" else m.zscore_7d
+            reason_parts.append(
+                f"{ref_z:.1f}σ vs {m.dump_timeframe} hourly avg · Bounce: {m.dump_bounce_outlook}"
+            )
         elif mode == "alch_floor":
             if m.alch_floor_score < 20:
                 continue
@@ -93,12 +96,21 @@ def generate_trade_calls(
             reason_parts.append(f"Protected near High Alch floor ({m.alch_floor_pct:+.1f}%)")
         else:
             # auto_mix: pick strongest valid edge for this item
-            if m.dump_sniper_score >= 65 and m.vwap_7d and m.low and m.vol_1h >= 5:
+            if (
+                m.dump_sniper_score >= 65
+                and m.dump_conservative_target
+                and m.low
+                and m.vol_1h >= 5
+                and m.dump_bounce_outlook != "LOW"
+            ):
                 strategy_tag = "dump_sniper"
                 buy_price = m.low
-                sell_price = max(m.suggested_sell, int(m.vwap_7d * 0.985))
+                sell_price = m.dump_conservative_target
                 score = m.dump_sniper_score * 1.02
-                reason_parts.append(f"Dump snipe ({min(m.zscore_24h, m.zscore_7d):.1f}σ below VWAP)")
+                ref_z = m.zscore_24h if m.dump_timeframe == "24h" else m.zscore_7d
+                reason_parts.append(
+                    f"{ref_z:.1f}σ vs {m.dump_timeframe} hourly avg · Bounce: {m.dump_bounce_outlook}"
+                )
             elif m.fast_flip_score >= m.overnight_score and m.fast_flip_score >= 25 and m.safety_score >= min_safety:
                 strategy_tag = "fast_flip"
                 score = m.fast_flip_score
@@ -236,13 +248,28 @@ def generate_trade_calls(
                 "is_tax_exempt": m.is_tax_exempt,
                 "is_mega_rare_capped": m.is_mega_rare_capped,
                 "ofi_1h": round(m.ofi_1h, 2),
+                "zscore_24h": round(m.zscore_24h, 2),
                 "zscore_7d": round(m.zscore_7d, 2),
                 "vol_1h": m.vol_1h,
+                "vol_1h_high": m.vol_1h_high,
+                "vol_1h_low": m.vol_1h_low,
                 "vol_24h": m.vol_24h,
+                "vol_24h_high": m.vol_24h_high,
+                "vol_24h_low": m.vol_24h_low,
                 "high_age_sec": m.high_age_sec,
                 "low_age_sec": m.low_age_sec,
                 "reason": reason,
                 "manipulation_flags": m.manipulation_flags,
+                "dump_details": {
+                    "timeframe": m.dump_timeframe,
+                    "baseline_vwap": m.dump_baseline_vwap,
+                    "drop_pct": round(m.dump_drop_pct, 2),
+                    "bounce_outlook": m.dump_bounce_outlook,
+                    "bounce_reason": m.dump_bounce_reason,
+                    "conservative_target": m.dump_conservative_target,
+                    "full_target": m.dump_full_target,
+                    "target_basis": "99% of lower hourly VWAP (24h/7d)" if tag == "dump_sniper" else "Live high - 1 gp",
+                },
             }
         )
 

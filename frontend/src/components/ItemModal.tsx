@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, ColorType, type IChartApi } from 'lightweight-charts';
-import { AlertTriangle, Check, Copy, Play, TrendingUp, X } from 'lucide-react';
+import { createChart, ColorType, LineStyle } from 'lightweight-charts';
+import { AlertTriangle, Check, Copy, Flame, Info, Play, TrendingUp, X } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChartPoint, ItemMetrics } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
@@ -37,6 +37,8 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
   const [timestep, setTimestep] = useState<'5m' | '1h' | '6h' | '24h'>('5m');
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [loadingChart, setLoadingChart] = useState(false);
+  const [showVwapLines, setShowVwapLines] = useState(true);
+  const [hoverPoint, setHoverPoint] = useState<ChartPoint | null>(null);
 
   // Interactive Order Ticket state
   const [buyInput, setBuyInput] = useState<number>(0);
@@ -45,15 +47,14 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const chartContainerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<IChartApi | null>(null);
+  const priceContainerRef = useRef<HTMLDivElement | null>(null);
+  const volContainerRef = useRef<HTMLDivElement | null>(null);
 
   const slotBudget = useMemo(() => {
     const denom = Math.max(1, Math.min(freeSlots || 1, 8));
     return Math.floor(cashStack / denom);
   }, [cashStack, freeSlots]);
 
-  // Close on Escape
   useEffect(() => {
     if (!itemId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +64,6 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     return () => window.removeEventListener('keydown', onKey);
   }, [itemId, onClose]);
 
-  // Load item details & initialize calculator
   useEffect(() => {
     if (!itemId) return;
     let cancelled = false;
@@ -83,7 +83,6 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     };
   }, [itemId, slotBudget]);
 
-  // Load chart candles lazily
   useEffect(() => {
     if (!itemId) return;
     let cancelled = false;
@@ -91,7 +90,10 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     api
       .itemChart(itemId, timestep)
       .then((res) => {
-        if (!cancelled) setPoints(res.points);
+        if (!cancelled) {
+          setPoints(res.points);
+          setHoverPoint(res.points.length > 0 ? res.points[res.points.length - 1] : null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoadingChart(false);
@@ -101,11 +103,16 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     };
   }, [itemId, timestep]);
 
-  // Render TradingView lightweight-charts
+  // Synchronized Two-Pane Chart: Top = High/Low Price + VWAP lines, Bottom = Dedicated Buy (+) vs Sell (-) Volume
   useEffect(() => {
-    if (!chartContainerRef.current || points.length === 0) return;
+    if (!priceContainerRef.current || !volContainerRef.current || points.length === 0) return;
 
-    const chart = createChart(chartContainerRef.current, {
+    const pointByTs = new Map<number, ChartPoint>();
+    for (const p of points) {
+      pointByTs.set(p.timestamp, p);
+    }
+
+    const commonOpts = {
       layout: {
         background: { type: ColorType.Solid, color: '#070709' },
         textColor: '#a1a1aa',
@@ -115,33 +122,35 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
         horzLines: { color: 'rgba(255,255,255,0.04)' },
       },
       crosshair: {
-        vertLine: { color: 'rgba(255,255,255,0.2)', labelBackgroundColor: '#18181b' },
-        horzLine: { color: 'rgba(255,255,255,0.2)', labelBackgroundColor: '#18181b' },
+        vertLine: { color: 'rgba(255,255,255,0.22)', labelBackgroundColor: '#18181b' },
+        horzLine: { color: 'rgba(255,255,255,0.18)', labelBackgroundColor: '#18181b' },
       },
-      width: chartContainerRef.current.clientWidth,
-      height: 390,
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.07)' },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.07)' },
-    });
-    chartRef.current = chart;
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.07)', minimumWidth: 72 },
+    };
 
-    const highSeries = chart.addLineSeries({
+    const priceChart = createChart(priceContainerRef.current, {
+      ...commonOpts,
+      width: priceContainerRef.current.clientWidth,
+      height: 295,
+      timeScale: { visible: false, borderColor: 'rgba(255,255,255,0.07)' },
+    });
+
+    const volChart = createChart(volContainerRef.current, {
+      ...commonOpts,
+      width: volContainerRef.current.clientWidth,
+      height: 155,
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.07)' },
+    });
+
+    const highSeries = priceChart.addLineSeries({
       color: '#f59e0b',
       lineWidth: 2,
-      title: 'High (Sell)',
+      title: 'High',
     });
-    const lowSeries = chart.addLineSeries({
+    const lowSeries = priceChart.addLineSeries({
       color: '#e4e4e7',
       lineWidth: 2,
-      title: 'Low (Buy)',
-    });
-    const volSeries = chart.addHistogramSeries({
-      color: 'rgba(16, 185, 129, 0.25)',
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    });
-    volSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
+      title: 'Low',
     });
 
     const highData = points
@@ -150,32 +159,112 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     const lowData = points
       .filter((p) => p.avgLowPrice !== null)
       .map((p) => ({ time: p.timestamp as never, value: p.avgLowPrice as number }));
-    const volData = points.map((p) => ({
-      time: p.timestamp as never,
-      value: (p.highPriceVolume || 0) + (p.lowPriceVolume || 0),
-      color:
-        (p.highPriceVolume || 0) >= (p.lowPriceVolume || 0)
-          ? 'rgba(16, 185, 129, 0.32)'
-          : 'rgba(244, 63, 94, 0.32)',
-    }));
 
     highSeries.setData(highData);
     lowSeries.setData(lowData);
-    volSeries.setData(volData);
-    chart.timeScale().fitContent();
+
+    // Optional VWAP reference lines so you can literally see the Dump Sniper mean-reversion baseline
+    if (showVwapLines && item) {
+      if (item.vwap_24h && item.vwap_24h > 0) {
+        highSeries.createPriceLine({
+          price: Math.round(item.vwap_24h),
+          color: '#38bdf8',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: '24h VWAP',
+        });
+      }
+      if (item.vwap_7d && item.vwap_7d > 0) {
+        highSeries.createPriceLine({
+          price: Math.round(item.vwap_7d),
+          color: '#a78bfa',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: '7d VWAP',
+        });
+      }
+    }
+
+    // Bottom Pane: Diverging Buy Volume (Emerald UP) vs Sell Volume (Rose DOWN)
+    const buyVolSeries = volChart.addHistogramSeries({
+      color: 'rgba(16, 185, 129, 0.85)',
+      priceFormat: {
+        type: 'custom',
+        formatter: (val: number) => `${Math.round(Math.abs(val)).toLocaleString()}`,
+      },
+      title: 'Buy Vol',
+    });
+    const sellVolSeries = volChart.addHistogramSeries({
+      color: 'rgba(244, 63, 94, 0.85)',
+      priceFormat: {
+        type: 'custom',
+        formatter: (val: number) => `${Math.round(Math.abs(val)).toLocaleString()}`,
+      },
+      title: 'Sell Vol',
+    });
+
+    buyVolSeries.setData(
+      points.map((p) => ({
+        time: p.timestamp as never,
+        value: p.highPriceVolume || 0,
+        color: 'rgba(16, 185, 129, 0.82)',
+      })),
+    );
+    sellVolSeries.setData(
+      points.map((p) => ({
+        time: p.timestamp as never,
+        value: -(p.lowPriceVolume || 0),
+        color: 'rgba(244, 63, 94, 0.82)',
+      })),
+    );
+
+    priceChart.timeScale().fitContent();
+    volChart.timeScale().fitContent();
+
+    // Two-way time-range sync between Price and Volume panes
+    let syncing = false;
+    priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (syncing || !range) return;
+      syncing = true;
+      volChart.timeScale().setVisibleLogicalRange(range);
+      syncing = false;
+    });
+    volChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      if (syncing || !range) return;
+      syncing = true;
+      priceChart.timeScale().setVisibleLogicalRange(range);
+      syncing = false;
+    });
+
+    // Live hover legend sync from either pane
+    const handleHover = (param: { time?: unknown }) => {
+      if (typeof param.time === 'number') {
+        const pt = pointByTs.get(param.time);
+        if (pt) setHoverPoint(pt);
+      } else if (points.length > 0) {
+        setHoverPoint(points[points.length - 1]);
+      }
+    };
+    priceChart.subscribeCrosshairMove(handleHover);
+    volChart.subscribeCrosshairMove(handleHover);
 
     const onResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      if (priceContainerRef.current) {
+        priceChart.applyOptions({ width: priceContainerRef.current.clientWidth });
+      }
+      if (volContainerRef.current) {
+        volChart.applyOptions({ width: volContainerRef.current.clientWidth });
       }
     };
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('resize', onResize);
-      chart.remove();
-      chartRef.current = null;
+      priceChart.remove();
+      volChart.remove();
     };
-  }, [points]);
+  }, [points, showVwapLines, item?.vwap_24h, item?.vwap_7d]);
 
   if (!itemId) return null;
 
@@ -212,19 +301,38 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
     }
   };
 
-  const ofiPct = item ? Math.round(((item.ofi_1h + 1) / 2) * 100) : 50;
+  const displayPt = hoverPoint || (points.length > 0 ? points[points.length - 1] : null);
+  const volRows = item
+    ? [
+        { label: '5m', buy: item.vol_5m_high, sell: item.vol_5m_low, total: item.vol_5m },
+        { label: '1h', buy: item.vol_1h_high, sell: item.vol_1h_low, total: item.vol_1h },
+        { label: '24h', buy: item.vol_24h_high, sell: item.vol_24h_low, total: item.vol_24h },
+      ]
+    : [];
+
+  const limitTurnover1h =
+    item && item.buy_limit > 0 && item.vol_1h > 0 ? (item.vol_1h / item.buy_limit).toFixed(1) : null;
+
+  const bounceBadgeCls =
+    item?.dump_bounce_outlook === 'HIGH'
+      ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+      : item?.dump_bounce_outlook === 'MEDIUM'
+        ? 'border-amber-500/30 bg-amber-500/15 text-amber-300'
+        : item?.dump_bounce_outlook === 'LOW'
+          ? 'border-rose-500/35 bg-rose-500/15 text-rose-300'
+          : 'border-white/10 bg-zinc-900 text-zinc-400';
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[92vh] w-full max-w-[1280px] flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#0a0a0d] shadow-2xl"
+        className="flex max-h-[94vh] w-full max-w-[1340px] flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#0a0a0d] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Modal Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] bg-[#0c0c10] px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] bg-[#0c0c10] px-5 py-3.5">
           <div className="flex items-center gap-3.5 min-w-0">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/[0.1] bg-[#141419]">
               {item?.icon && <img src={wikiIconUrl(item.icon)} alt="" className="h-8 w-8 object-contain" />}
@@ -246,7 +354,9 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
               <p className="text-xs text-zinc-500 mt-0.5">
                 ID #{itemId} · {item?.members ? 'Members' : 'F2P'} · 4h GE Limit:{' '}
                 <strong className="text-zinc-200">{item?.buy_limit?.toLocaleString() || '—'}</strong>
-                {item?.examine && <span className="hidden md:inline text-zinc-600"> · {item.examine}</span>}
+                {limitTurnover1h && (
+                  <span className="text-emerald-400"> · 1h Vol = {limitTurnover1h}× limit</span>
+                )}
               </p>
             </div>
           </div>
@@ -257,13 +367,15 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
                 <div>
                   <div className="text-[10px] text-zinc-500">LIVE LOW (BID)</div>
                   <div className="font-bold text-zinc-100">
-                    {formatGp(item.low)} <span className="text-[10px] font-normal text-zinc-500">({formatAge(item.low_age_sec)})</span>
+                    {formatGp(item.low)}{' '}
+                    <span className="text-[10px] font-normal text-zinc-500">({formatAge(item.low_age_sec)})</span>
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] text-zinc-500">LIVE HIGH (ASK)</div>
                   <div className="font-bold text-amber-300">
-                    {formatGp(item.high)} <span className="text-[10px] font-normal text-zinc-500">({formatAge(item.high_age_sec)})</span>
+                    {formatGp(item.high)}{' '}
+                    <span className="text-[10px] font-normal text-zinc-500">({formatAge(item.high_age_sec)})</span>
                   </div>
                 </div>
               </div>
@@ -279,11 +391,12 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
         </div>
 
         {/* Body: Spacious 2-Column Layout */}
-        <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[1.65fr_1fr]">
-          {/* LEFT COLUMN: Widescreen Chart + Market Microstructure */}
-          <div className="space-y-4 min-w-0">
+        <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto p-5 lg:grid-cols-[1.68fr_1fr]">
+          {/* LEFT COLUMN: Synced 2-Pane Chart (Price + Dedicated Buy/Sell Volume) + Volume Breakdown */}
+          <div className="space-y-3.5 min-w-0">
+            {/* Controls + Live Crosshair Readout */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {TIMEFRAMES.map((tf) => (
                   <button
                     key={tf.key}
@@ -297,102 +410,199 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
                     {tf.label}
                   </button>
                 ))}
+                <label className="ml-2 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showVwapLines}
+                    onChange={(e) => setShowVwapLines(e.target.checked)}
+                    className="accent-sky-400"
+                  />
+                  <span>VWAP lines</span>
+                </label>
               </div>
-              <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-amber-400" /> High (Sell)
+
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-500">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" /> High
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-zinc-200" /> Low (Buy)
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-zinc-200" /> Low
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-emerald-400" /> Buy Vol ↑
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-rose-400" /> Sell Vol ↓
                 </span>
                 {loadingChart && <span className="text-amber-300">Loading...</span>}
               </div>
             </div>
 
-            <div
-              ref={chartContainerRef}
-              className="w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-[#070709]"
-            />
+            {/* Live Hover Legend Strip */}
+            {displayPt && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-[#0f0f13] px-3.5 py-2 text-xs tabular-nums">
+                <span className="text-zinc-400 font-medium">
+                  {new Date(displayPt.timestamp * 1000).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+                <div className="flex flex-wrap items-center gap-4">
+                  <span>
+                    <span className="text-zinc-500">High </span>
+                    <strong className="text-amber-300">{formatGp(displayPt.avgHighPrice)}</strong>
+                  </span>
+                  <span>
+                    <span className="text-zinc-500">Low </span>
+                    <strong className="text-zinc-100">{formatGp(displayPt.avgLowPrice)}</strong>
+                  </span>
+                  <span>
+                    <span className="text-zinc-500">Instant-Buys </span>
+                    <strong className="text-emerald-400">+{displayPt.highPriceVolume.toLocaleString()}</strong>
+                  </span>
+                  <span>
+                    <span className="text-zinc-500">Instant-Sells </span>
+                    <strong className="text-rose-400">-{displayPt.lowPriceVolume.toLocaleString()}</strong>
+                  </span>
+                  <span>
+                    <span className="text-zinc-500">Net Flow </span>
+                    <strong
+                      className={
+                        displayPt.highPriceVolume - displayPt.lowPriceVolume >= 0
+                          ? 'text-emerald-300'
+                          : 'text-rose-300'
+                      }
+                    >
+                      {displayPt.highPriceVolume - displayPt.lowPriceVolume >= 0 ? '+' : ''}
+                      {(displayPt.highPriceVolume - displayPt.lowPriceVolume).toLocaleString()}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Synchronized Dual-Pane Chart Container */}
+            <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#070709]">
+              <div ref={priceContainerRef} className="w-full" />
+              <div className="flex items-center justify-between border-y border-white/[0.06] bg-[#0b0b0f] px-3 py-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                <span>Buy vs. Sell Volume (Emerald ↑ = Instant-Buys into Sell Offers · Rose ↓ = Instant-Sells into Buy Offers)</span>
+              </div>
+              <div ref={volContainerRef} className="w-full" />
+            </div>
+
+            {/* Dedicated Buy vs. Sell Volume Breakdown (5m / 1h / 24h) */}
+            {item && (
+              <div className="rounded-xl border border-white/[0.07] bg-[#0f0f13] p-3.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                    Buy vs. Sell Volume Breakdown
+                  </span>
+                  <span className="text-[11px] text-zinc-500 tabular-nums">
+                    5m Vol Spike: <strong className={item.volume_spike_ratio >= 2 ? 'text-amber-300' : 'text-zinc-300'}>{item.volume_spike_ratio.toFixed(1)}×</strong> normal
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  {volRows.map((row) => {
+                    const buyPct = row.total > 0 ? Math.round((row.buy / row.total) * 100) : 50;
+                    const sellPct = 100 - buyPct;
+                    return (
+                      <div key={row.label} className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5 text-xs tabular-nums">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-zinc-200">{row.label} Window</span>
+                          <span className="text-zinc-400">Total: <strong className="text-zinc-100">{row.total.toLocaleString()}</strong></span>
+                        </div>
+                        <div className="mt-1.5 flex justify-between text-[11px]">
+                          <span className="text-emerald-400 font-semibold">Buy: {row.buy.toLocaleString()} ({buyPct}%)</span>
+                          <span className="text-rose-400 font-semibold">Sell: {row.sell.toLocaleString()} ({sellPct}%)</span>
+                        </div>
+                        <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-rose-500/60">
+                          <div className="h-full bg-emerald-400" style={{ width: `${buyPct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Mean-Reversion / Dump Sniper Explainer Panel */}
+            {item && (
+              <div className="rounded-xl border border-white/[0.08] bg-[#0f0f13] p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Flame className="h-4 w-4 text-rose-400" />
+                    <span className="text-xs font-bold text-zinc-100">
+                      Mean-Reversion & Dump Analysis (Hourly Candles)
+                    </span>
+                  </div>
+                  <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${bounceBadgeCls}`}>
+                    Bounce Outlook: {item.dump_bounce_outlook || 'NONE'}
+                  </span>
+                </div>
+
+                <p className="text-[11px] leading-relaxed text-zinc-400 flex items-start gap-1.5">
+                  <Info className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" />
+                  <span>
+                    Standard deviation (σ) is measured over <strong>hourly (/1h) candles</strong>:{' '}
+                    <strong>24h</strong> = last 24 hourly candles (1σ = {formatGp(item.std_24h ? Math.round(item.std_24h) : 0)} gp),{' '}
+                    <strong>7d</strong> = last {item.candles_1h_count || 24} hourly candles (1σ = {formatGp(item.std_7d ? Math.round(item.std_7d) : 0)} gp).{' '}
+                    {item.dump_bounce_reason}
+                  </span>
+                </p>
+
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 text-xs tabular-nums">
+                  <div className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5">
+                    <div className="text-[10px] text-sky-400">24h Hourly VWAP</div>
+                    <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_24h ? Math.round(item.vwap_24h) : null)}</div>
+                    <div className={`text-[10px] ${item.zscore_24h <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
+                      Z = {item.zscore_24h.toFixed(2)}σ
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5">
+                    <div className="text-[10px] text-violet-400">7d Hourly VWAP</div>
+                    <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_7d ? Math.round(item.vwap_7d) : null)}</div>
+                    <div className={`text-[10px] ${item.zscore_7d <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
+                      Z = {item.zscore_7d.toFixed(2)}σ
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => item.dump_conservative_target && setSellInput(item.dump_conservative_target)}
+                    disabled={!item.dump_conservative_target}
+                    className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-2.5 text-left hover:bg-emerald-500/15 disabled:opacity-40 transition"
+                    title="Click to load Safe Bounce Target into calculator"
+                  >
+                    <div className="text-[10px] text-emerald-300">Safe Bounce Target ↗</div>
+                    <div className="mt-0.5 font-bold text-emerald-200">{formatGp(item.dump_conservative_target)}</div>
+                    <div className="text-[10px] text-emerald-400/80">99% of lower VWAP</div>
+                  </button>
+                  <button
+                    onClick={() => item.dump_full_target && setSellInput(item.dump_full_target)}
+                    disabled={!item.dump_full_target}
+                    className="rounded-lg border border-violet-500/25 bg-violet-500/10 p-2.5 text-left hover:bg-violet-500/15 disabled:opacity-40 transition"
+                    title="Click to load Full 7d Rebound Target into calculator"
+                  >
+                    <div className="text-[10px] text-violet-300">Full 7d Rebound ↗</div>
+                    <div className="mt-0.5 font-bold text-violet-200">{formatGp(item.dump_full_target)}</div>
+                    <div className="text-[10px] text-violet-400/80">98.5% of 7d VWAP</div>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Risk flags if present */}
             {item && item.manipulation_flags.length > 0 && (
               <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
                 <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                <span>Caution flags: <strong>{item.manipulation_flags.join(' · ')}</strong></span>
-              </div>
-            )}
-
-            {/* Market Microstructure Metrics Strip */}
-            {item && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 text-xs tabular-nums">
-                  <MetricTile
-                    label="24h Volume"
-                    value={item.vol_24h.toLocaleString()}
-                    sub={`1h: ${item.vol_1h.toLocaleString()} · 5m: ${item.vol_5m.toLocaleString()}`}
-                  />
-                  <MetricTile
-                    label="7d VWAP / Z-Score"
-                    value={formatGp(item.vwap_7d ? Math.round(item.vwap_7d) : null)}
-                    sub={`Z: ${item.zscore_7d.toFixed(2)}σ · Vol: ${item.volatility_24h_pct.toFixed(1)}%`}
-                    accent={item.zscore_7d <= -1.6 ? 'text-rose-400' : 'text-zinc-100'}
-                  />
-                  <MetricTile
-                    label="Max Profit / Limit"
-                    value={formatGp(item.max_profit_per_limit, true)}
-                    sub={`Est: ${formatGp(item.est_gp_per_hour_limit, true)}/hr`}
-                    accent="text-emerald-400"
-                  />
-                  <MetricTile
-                    label="High Alch Floor"
-                    value={formatGp(item.highalch)}
-                    sub={item.alch_floor_pct !== null ? `Cushion: ${item.alch_floor_pct.toFixed(1)}%` : 'No alch'}
-                  />
-                </div>
-
-                {/* Order-Flow Pressure Bar + Strategy Scores */}
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <div className="rounded-xl border border-white/[0.07] bg-[#0f0f13] p-3">
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-2">
-                      <span>Order-Flow Pressure (1h)</span>
-                      <span className={item.ofi_1h >= 0 ? 'font-bold text-emerald-400' : 'font-bold text-rose-400'}>
-                        {item.ofi_1h >= 0 ? '+' : ''}
-                        {(item.ofi_1h * 100).toFixed(0)}% {item.ofi_1h > 0.25 ? '(Buying)' : item.ofi_1h < -0.25 ? '(Selling)' : '(Balanced)'}
-                      </span>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-rose-500/35">
-                      <div className="h-full bg-emerald-400 transition-all" style={{ width: `${ofiPct}%` }} />
-                    </div>
-                    <div className="mt-1.5 flex justify-between text-[10px] text-zinc-500 tabular-nums">
-                      <span>Instant-Sells: {item.vol_1h_low.toLocaleString()}</span>
-                      <span>Instant-Buys: {item.vol_1h_high.toLocaleString()}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/[0.07] bg-[#0f0f13] p-3 text-center text-xs tabular-nums">
-                    <div>
-                      <div className="text-[9px] text-zinc-500">FAST</div>
-                      <div className="mt-1 text-sm font-bold text-emerald-400">{Math.round(item.fast_flip_score)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-zinc-500">MARGIN</div>
-                      <div className="mt-1 text-sm font-bold text-zinc-200">{Math.round(item.overnight_score)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-zinc-500">DUMP</div>
-                      <div className="mt-1 text-sm font-bold text-rose-400">{Math.round(item.dump_sniper_score)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-zinc-500">SAFETY</div>
-                      <div className="mt-1 text-sm font-bold text-amber-300">{item.safety_score}</div>
-                    </div>
-                  </div>
-                </div>
+                <span>
+                  Caution flags: <strong>{item.manipulation_flags.join(' · ')}</strong>
+                </span>
               </div>
             )}
           </div>
 
-          {/* RIGHT COLUMN: Interactive Flip Calculator & Order Ticket */}
+          {/* RIGHT COLUMN: Interactive Flip Calculator & Order Ticket + Key Scores */}
           <div className="flex flex-col justify-between rounded-2xl border border-white/[0.08] bg-[#0f0f13] p-5">
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
@@ -548,6 +758,28 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
                   </div>
                 </div>
               </div>
+
+              {/* Compact Strategy Scores + High Alch */}
+              {item && (
+                <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/[0.07] bg-[#060608] p-3 text-center text-xs tabular-nums">
+                  <div>
+                    <div className="text-[9px] text-zinc-500">FAST</div>
+                    <div className="mt-0.5 font-bold text-emerald-400">{Math.round(item.fast_flip_score)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-zinc-500">MARGIN</div>
+                    <div className="mt-0.5 font-bold text-zinc-200">{Math.round(item.overnight_score)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-zinc-500">DUMP</div>
+                    <div className="mt-0.5 font-bold text-rose-400">{Math.round(item.dump_sniper_score)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-zinc-500">SAFETY</div>
+                    <div className="mt-0.5 font-bold text-amber-300">{item.safety_score}</div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Submit CTA */}
@@ -568,26 +800,6 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MetricTile({
-  label,
-  value,
-  sub,
-  accent = 'text-zinc-100',
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  accent?: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/[0.07] bg-[#0f0f13] p-3">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
-      <div className={`mt-1 text-sm font-bold ${accent}`}>{value}</div>
-      <div className="mt-0.5 text-[10px] text-zinc-500">{sub}</div>
     </div>
   );
 }

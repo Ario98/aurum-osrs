@@ -179,9 +179,68 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
           </div>
         </div>
 
+        {/* 1h Buy vs. Sell Volume Strip */}
+        <div className="mt-2.5 rounded-lg border border-white/[0.04] bg-[#08080b] px-2.5 py-2 text-[11px] tabular-nums">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-400">
+              1h Vol <strong className="text-zinc-100">{call.vol_1h.toLocaleString()}</strong>
+              <span className="text-zinc-600"> · 24h {formatGp(call.vol_24h, true)}</span>
+            </span>
+            {(() => {
+              const b = call.vol_1h_high ?? 0;
+              const s = call.vol_1h_low ?? 0;
+              const tot = b + s;
+              const bPct = tot > 0 ? Math.round((b / tot) * 100) : 50;
+              return (
+                <span>
+                  <span className="text-emerald-400 font-semibold">{bPct}% B</span>
+                  <span className="text-zinc-600"> / </span>
+                  <span className="text-rose-400 font-semibold">{100 - bPct}% S</span>
+                </span>
+              );
+            })()}
+          </div>
+          {(() => {
+            const b = call.vol_1h_high ?? 0;
+            const s = call.vol_1h_low ?? 0;
+            const tot = b + s;
+            const bPct = tot > 0 ? Math.round((b / tot) * 100) : 50;
+            return (
+              <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-rose-500/55">
+                <div className="h-full bg-emerald-400" style={{ width: `${bPct}%` }} />
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Dump Sniper Transparency Box */}
+        {call.strategy === 'dump_sniper' && call.dump_details && (
+          <div className="mt-2.5 rounded-lg border border-rose-500/20 bg-rose-500/[0.06] px-2.5 py-2 text-[11px] space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-rose-300 flex items-center gap-1">
+                <Flame className="h-3 w-3" />
+                {call.dump_details.timeframe} Hourly Avg: {formatGp(call.dump_details.baseline_vwap)} gp
+              </span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                  call.dump_details.bounce_outlook === 'HIGH'
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : call.dump_details.bounce_outlook === 'MEDIUM'
+                      ? 'bg-amber-500/20 text-amber-300'
+                      : 'bg-rose-500/20 text-rose-300'
+                }`}
+              >
+                BOUNCE: {call.dump_details.bounce_outlook}
+              </span>
+            </div>
+            <div className="text-[10px] text-zinc-400 leading-snug">
+              Sell target = <strong className="text-zinc-200">{call.dump_details.target_basis}</strong> ({call.dump_details.drop_pct.toFixed(1)}% below hourly avg).
+            </div>
+          </div>
+        )}
+
         {/* Plain-English Reason */}
-        <p className="mt-2.5 text-[11px] leading-relaxed text-zinc-400 line-clamp-2">
-          {call.strategy === 'dump_sniper' && <Flame className="inline h-3 w-3 text-rose-400 mr-1 -mt-0.5" />}
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-400 line-clamp-2">
           {call.reason}
         </p>
       </div>
