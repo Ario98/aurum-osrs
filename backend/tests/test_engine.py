@@ -210,6 +210,53 @@ def test_arbitrage_decanting_and_sets():
     assert sets[0]["direction"] == "PACK"
     assert sets[0]["net_profit"] == 330_000
 
+    # Expanded Arbitrage: Zahur Unfinished Potions & Plank Make / Enchanting
+    from app.engine.arbitrage import scan_herb_and_zahur, scan_processing_and_enchanting
+
+    now = int(time.time())
+    st2 = MarketState()
+    st2.load_items(
+        [
+            {"id": 561, "name": "Nature rune", "members": 1, "buy_limit": 18000, "highalch": 108, "lowalch": 72, "is_tax_exempt": 0, "icon": ""},
+            {"id": 9075, "name": "Astral rune", "members": 1, "buy_limit": 10000, "highalch": 30, "lowalch": 20, "is_tax_exempt": 0, "icon": ""},
+            {"id": 564, "name": "Cosmic rune", "members": 1, "buy_limit": 12000, "highalch": 30, "lowalch": 20, "is_tax_exempt": 0, "icon": ""},
+            {"id": 227, "name": "Vial of water", "members": 0, "buy_limit": 13000, "highalch": 1, "lowalch": 1, "is_tax_exempt": 0, "icon": ""},
+            {"id": 257, "name": "Ranarr weed", "members": 1, "buy_limit": 11000, "highalch": 10, "lowalch": 5, "is_tax_exempt": 0, "icon": ""},
+            {"id": 99, "name": "Ranarr potion (unf)", "members": 1, "buy_limit": 10000, "highalch": 10, "lowalch": 5, "is_tax_exempt": 0, "icon": ""},
+            {"id": 1639, "name": "Emerald ring", "members": 0, "buy_limit": 10000, "highalch": 765, "lowalch": 510, "is_tax_exempt": 0, "icon": ""},
+            {"id": 2552, "name": "Ring of dueling(8)", "members": 1, "buy_limit": 10000, "highalch": 765, "lowalch": 510, "is_tax_exempt": 1, "icon": ""},
+        ]
+    )
+    st2.update_latest(
+        {
+            561: {"high": 100, "highTime": now, "low": 98, "lowTime": now},
+            9075: {"high": 80, "highTime": now, "low": 78, "lowTime": now},
+            564: {"high": 120, "highTime": now, "low": 118, "lowTime": now},
+            227: {"high": 5, "highTime": now, "low": 4, "lowTime": now},
+            257: {"high": 6000, "highTime": now, "low": 5900, "lowTime": now},
+            99: {"high": 6600, "highTime": now, "low": 6500, "lowTime": now},
+            1639: {"high": 800, "highTime": now, "low": 780, "lowTime": now},
+            2552: {"high": 1150, "highTime": now, "low": 1100, "lowTime": now},
+        }
+    )
+    st2.ingest_candle_bucket(
+        "1h",
+        ((now // 3600) - 1) * 3600,
+        {
+            257: {"avgHighPrice": 6000, "avgLowPrice": 5900, "highPriceVolume": 500, "lowPriceVolume": 500},
+            99: {"avgHighPrice": 6600, "avgLowPrice": 6500, "highPriceVolume": 500, "lowPriceVolume": 500},
+            1639: {"avgHighPrice": 800, "avgLowPrice": 780, "highPriceVolume": 500, "lowPriceVolume": 500},
+            2552: {"avgHighPrice": 1150, "avgLowPrice": 1100, "highPriceVolume": 500, "lowPriceVolume": 500},
+        },
+    )
+    st2.recompute_all_metrics()
+
+    herbs = scan_herb_and_zahur(st2, members=True)
+    assert any(h["method"] == "ZAHUR_UNF" and h["net_profit"] > 0 for h in herbs)
+
+    proc = scan_processing_and_enchanting(st2, members=True)
+    assert any(p["category"] == "ENCHANT" and p["output_name"] == "Ring of dueling(8)" and p["tax"] == 0 for p in proc)
+
 
 def test_offer_coach_signals():
     state = _build_sample_state()
@@ -357,6 +404,11 @@ async def test_dink_webhook_lifecycle(tmp_path: Path, monkeypatch: pytest.Monkey
     assert client.get("/api/slots").json()["used_slots"] == 0
     journal = client.get("/api/journal").json()
     assert journal["summary"]["total_flips"] == 1
+    assert len(journal["analytics"]["equity_curve"]) == 1
+    assert len(journal["analytics"]["top_winners"]) == 1
+    csv_res = client.get("/api/journal/export.csv")
+    assert csv_res.status_code == 200
+    assert "Abyssal whip" in csv_res.text
     expected_tax = calculate_ge_tax(1_560_000) * 5
     expected_profit = (1_560_000 - 1_500_000) * 5 - expected_tax
     assert journal["summary"]["total_profit"] == expected_profit

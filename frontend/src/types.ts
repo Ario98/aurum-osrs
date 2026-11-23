@@ -229,6 +229,32 @@ export interface BuyLimitRecord {
   remaining_qty: number | null;
 }
 
+export interface JournalEquityPoint {
+  ts: number;
+  profit: number;
+  cumulative_profit: number;
+  item_name: string;
+}
+
+export interface JournalDailyPnl {
+  date: string;
+  flips: number;
+  wins: number;
+  net_profit: number;
+  tax_paid: number;
+}
+
+export interface JournalLeaderboardItem {
+  item_id: number;
+  item_name: string;
+  flips: number;
+  win_rate_pct: number;
+  total_profit: number;
+  avg_roi_pct: number;
+  avg_hold_minutes: number;
+  gp_per_hour: number;
+}
+
 export interface JournalResponse {
   summary: {
     total_flips: number;
@@ -239,9 +265,16 @@ export interface JournalResponse {
     win_rate_pct: number;
     avg_roi_pct: number;
     realized_gp_per_hour: number;
+    avg_hold_minutes?: number;
   };
   history: FlipRecord[];
   buy_limits: BuyLimitRecord[];
+  analytics?: {
+    equity_curve: JournalEquityPoint[];
+    daily_pnl: JournalDailyPnl[];
+    top_winners: JournalLeaderboardItem[];
+    worst_items: JournalLeaderboardItem[];
+  };
 }
 
 export interface SetArbitrage {
@@ -298,10 +331,55 @@ export interface AlchArbitrage {
   vol_24h: number;
 }
 
+export interface HerbZahurArbitrage {
+  method: 'ZAHUR_UNF' | 'HERB_CLEAN';
+  method_label: string;
+  level_req: number;
+  input_id: number;
+  input_name: string;
+  input_price: number;
+  extra_cost: number;
+  extra_note: string;
+  output_id: number;
+  output_name: string;
+  output_price: number;
+  tax: number;
+  net_profit: number;
+  instant_profit: number;
+  is_instant_profitable: boolean;
+  roi_pct: number;
+  buy_limit: number;
+  profit_per_limit: number;
+  vol_24h: number;
+}
+
+export interface ProcessingArbitrage {
+  category: 'PLANK_MAKE' | 'SAWMILL' | 'ENCHANT';
+  method_label: string;
+  input_id: number;
+  input_name: string;
+  input_price: number;
+  extra_cost: number;
+  extra_note: string;
+  output_id: number;
+  output_name: string;
+  output_price: number;
+  tax: number;
+  net_profit: number;
+  roi_pct: number;
+  buy_limit: number;
+  profit_per_limit: number;
+  est_gp_per_hour: number;
+  vol_24h: number;
+  is_tax_exempt: boolean;
+}
+
 export interface ArbitrageSummary {
   nature_rune_price: number;
   sets: SetArbitrage[];
   decanting: DecantArbitrage[];
+  herbs_zahur: HerbZahurArbitrage[];
+  processing: ProcessingArbitrage[];
   high_alch: AlchArbitrage[];
 }
 

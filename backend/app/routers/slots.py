@@ -216,11 +216,65 @@ async def get_journal(
     summary = await repo.get_flip_summary()
     history = await repo.get_flip_history(limit=limit)
     buy_limits = await repo.get_active_buy_limits()
+    analytics = await repo.get_journal_analytics()
     return {
         "summary": summary,
         "history": history,
         "buy_limits": buy_limits,
+        "analytics": analytics,
     }
+
+
+@router.get("/journal/export.csv")
+async def export_journal_csv(request: Request) -> Any:
+    import csv
+    import io
+    from datetime import datetime, timezone
+    from fastapi.responses import Response
+
+    repo = request.app.state.repo
+    rows = await repo.get_flip_history(limit=5000)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "closed_at_utc",
+            "item_id",
+            "item_name",
+            "quantity",
+            "buy_price",
+            "sell_price",
+            "tax_paid",
+            "net_profit",
+            "roi_pct",
+            "duration_sec",
+            "source",
+        ]
+    )
+    for r in rows:
+        dt_str = datetime.fromtimestamp(int(r["closed_at"]), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        writer.writerow(
+            [
+                dt_str,
+                r["item_id"],
+                r["item_name"],
+                r["quantity"],
+                r["buy_price"],
+                r["sell_price"],
+                r["tax_paid"],
+                r["net_profit"],
+                r["roi_pct"],
+                r["duration_sec"],
+                r["source"],
+            ]
+        )
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="osrs_flip_journal.csv"'},
+    )
 
 
 @router.get("/buy-limits")

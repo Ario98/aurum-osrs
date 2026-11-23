@@ -426,6 +426,103 @@ class Repository:
             "win_rate_pct": round(win_rate, 1),
             "avg_roi_pct": round(float(row["avg_roi_pct"]), 2),
             "realized_gp_per_hour": gp_hr,
+            "avg_hold_minutes": round((total_dur / total_flips) / 60.0, 1) if total_flips > 0 else 0.0,
+        }
+
+    async def get_journal_analytics(self) -> dict[str, Any]:
+        """Build cumulative realized P&L curve, 30d daily breakdown & per-item leaderboard."""
+        from datetime import datetime, timezone
+
+        async with self.db.conn.execute(
+            """
+            SELECT item_id, item_name, net_profit, tax_paid, roi_pct, duration_sec, closed_at
+            FROM flip_history
+            ORDER BY closed_at ASC, id ASC
+            """
+        ) as cur:
+            rows = await cur.fetchall()
+
+        equity_curve: list[dict[str, Any]] = []
+        daily_map: dict[str, dict[str, Any]] = {}
+        item_map: dict[int, dict[str, Any]] = {}
+        cum_profit = 0
+
+        for r in rows:
+            profit = int(r["net_profit"])
+            tax = int(r["tax_paid"])
+            roi = float(r["roi_pct"])
+            dur = max(0, int(r["duration_sec"]))
+            closed_at = int(r["closed_at"])
+            iid = int(r["item_id"])
+            iname = str(r["item_name"])
+
+            cum_profit += profit
+            equity_curve.append(
+                {
+                    "ts": closed_at,
+                    "profit": profit,
+                    "cumulative_profit": cum_profit,
+                    "item_name": iname,
+                }
+            )
+
+            day_key = datetime.fromtimestamp(closed_at, tz=timezone.utc).strftime("%Y-%m-%d")
+            d = daily_map.setdefault(
+                day_key,
+                {"date": day_key, "flips": 0, "wins": 0, "net_profit": 0, "tax_paid": 0},
+            )
+            d["flips"] += 1
+            if profit > 0:
+                d["wins"] += 1
+            d["net_profit"] += profit
+            d["tax_paid"] += tax
+
+            it = item_map.setdefault(
+                iid,
+                {
+                    "item_id": iid,
+                    "item_name": iname,
+                    "flips": 0,
+                    "wins": 0,
+                    "total_profit": 0,
+                    "roi_sum": 0.0,
+                    "dur_sum": 0,
+                },
+            )
+            it["flips"] += 1
+            if profit > 0:
+                it["wins"] += 1
+            it["total_profit"] += profit
+            it["roi_sum"] += roi
+            it["dur_sum"] += dur
+
+        daily_pnl = sorted(daily_map.values(), key=lambda x: x["date"])[-30:]
+
+        leaderboard = []
+        for it in item_map.values():
+            flips = it["flips"]
+            dur_hrs = it["dur_sum"] / 3600.0
+            leaderboard.append(
+                {
+                    "item_id": it["item_id"],
+                    "item_name": it["item_name"],
+                    "flips": flips,
+                    "win_rate_pct": round((it["wins"] / flips) * 100.0, 1) if flips else 0.0,
+                    "total_profit": it["total_profit"],
+                    "avg_roi_pct": round(it["roi_sum"] / flips, 2) if flips else 0.0,
+                    "avg_hold_minutes": round((it["dur_sum"] / flips) / 60.0, 1) if flips else 0.0,
+                    "gp_per_hour": int(it["total_profit"] / dur_hrs) if dur_hrs >= 0.02 else it["total_profit"],
+                }
+            )
+
+        top_winners = sorted(leaderboard, key=lambda x: x["total_profit"], reverse=True)[:10]
+        worst_items = [x for x in sorted(leaderboard, key=lambda x: x["total_profit"]) if x["total_profit"] < 0][:5]
+
+        return {
+            "equity_curve": equity_curve[-200:],
+            "daily_pnl": daily_pnl,
+            "top_winners": top_winners,
+            "worst_items": worst_items,
         }
 
     async def record_buy_limit_usage(self, item_id: int, item_name: str, qty: int, buy_limit: int) -> None:

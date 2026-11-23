@@ -280,3 +280,287 @@ def scan_high_alch(
         )
     results.sort(key=lambda x: x["profit_per_limit"], reverse=True)
     return results[:limit]
+
+
+# ------------------------------------------------------------------
+# Expanded Processing Arbitrage: Zahur Unf. Potions, Herb Cleaning, Planks & Enchanting
+# ------------------------------------------------------------------
+
+HERB_CATALOG: list[tuple[str, str, str, int]] = [
+    # (grimy_name, clean_name, unf_potion_name, herblore_lvl)
+    ("Grimy guam leaf", "Guam leaf", "Guam potion (unf)", 3),
+    ("Grimy marrentill", "Marrentill", "Marrentill potion (unf)", 5),
+    ("Grimy tarromin", "Tarromin", "Tarromin potion (unf)", 11),
+    ("Grimy harralander", "Harralander", "Harralander potion (unf)", 20),
+    ("Grimy ranarr weed", "Ranarr weed", "Ranarr potion (unf)", 30),
+    ("Grimy toadflax", "Toadflax", "Toadflax potion (unf)", 34),
+    ("Grimy irit leaf", "Irit leaf", "Irit potion (unf)", 45),
+    ("Grimy avantoe", "Avantoe", "Avantoe potion (unf)", 50),
+    ("Grimy kwuarm", "Kwuarm", "Kwuarm potion (unf)", 55),
+    ("Grimy huasca", "Huasca", "Huasca potion (unf)", 58),
+    ("Grimy snapdragon", "Snapdragon", "Snapdragon potion (unf)", 63),
+    ("Grimy cadantine", "Cadantine", "Cadantine potion (unf)", 66),
+    ("Grimy lantadyme", "Lantadyme", "Lantadyme potion (unf)", 69),
+    ("Grimy dwarf weed", "Dwarf weed", "Dwarf weed potion (unf)", 72),
+    ("Grimy torstol", "Torstol", "Torstol potion (unf)", 78),
+]
+
+PLANK_CATALOG: list[tuple[str, str, int, int]] = [
+    # (log_name, plank_name, sawmill_fee, plank_make_fee)
+    ("Logs", "Plank", 100, 70),
+    ("Oak logs", "Oak plank", 250, 175),
+    ("Teak logs", "Teak plank", 500, 350),
+    ("Mahogany logs", "Mahogany plank", 1500, 1050),
+]
+
+ENCHANT_CATALOG: list[tuple[str, str, str, int]] = [
+    # (base_name, enchanted_name, tier, magic_lvl)
+    ("Sapphire ring", "Ring of recoil", "Sapphire", 7),
+    ("Sapphire necklace", "Games necklace(8)", "Sapphire", 7),
+    ("Sapphire amulet", "Amulet of magic", "Sapphire", 7),
+    ("Sapphire bracelet", "Bracelet of clay", "Sapphire", 7),
+    ("Emerald ring", "Ring of dueling(8)", "Emerald", 27),
+    ("Emerald necklace", "Binding necklace", "Emerald", 27),
+    ("Emerald amulet", "Amulet of defence", "Emerald", 27),
+    ("Emerald bracelet", "Castle wars bracelet(3)", "Emerald", 27),
+    ("Ruby ring", "Ring of forging", "Ruby", 49),
+    ("Ruby amulet", "Amulet of strength", "Ruby", 49),
+    ("Diamond ring", "Ring of life", "Diamond", 57),
+    ("Diamond necklace", "Phoenix necklace", "Diamond", 57),
+    ("Diamond amulet", "Amulet of power", "Diamond", 57),
+    ("Diamond bracelet", "Abyssal bracelet(5)", "Diamond", 57),
+    ("Dragonstone ring", "Ring of wealth", "Dragonstone", 68),
+    ("Dragonstone necklace", "Skills necklace", "Dragonstone", 68),
+    ("Dragonstone amulet", "Amulet of glory", "Dragonstone", 68),
+    ("Dragonstone bracelet", "Combat bracelet", "Dragonstone", 68),
+    ("Onyx ring", "Ring of stone", "Onyx", 87),
+    ("Onyx necklace", "Berserker necklace", "Onyx", 87),
+    ("Onyx amulet", "Amulet of fury", "Onyx", 87),
+    ("Onyx bracelet", "Regen bracelet", "Onyx", 87),
+    ("Zenyte ring", "Ring of suffering", "Zenyte", 93),
+    ("Zenyte necklace", "Necklace of anguish", "Zenyte", 93),
+    ("Zenyte amulet", "Amulet of torture", "Zenyte", 93),
+    ("Zenyte bracelet", "Tormented bracelet", "Zenyte", 93),
+]
+
+
+def scan_herb_and_zahur(
+    state: MarketState,
+    members: bool = True,
+) -> list[dict[str, Any]]:
+    """Scan Zahur Unfinished Potions (200 gp instant NPC) and Grimy -> Clean herb spreads."""
+    if not members:
+        return []
+
+    vial_id = state.name_to_id.get("vial of water")
+    vial_m = state.metrics.get(vial_id) if vial_id else None
+    vial_price = (vial_m.low or vial_m.high or 5) if vial_m else 5
+
+    results: list[dict[str, Any]] = []
+    for grimy_name, clean_name, unf_name, lvl in HERB_CATALOG:
+        gid = state.name_to_id.get(grimy_name.lower())
+        cid = state.name_to_id.get(clean_name.lower())
+        uid = state.name_to_id.get(unf_name.lower())
+        gm = state.metrics.get(gid) if gid else None
+        cm = state.metrics.get(cid) if cid else None
+        um = state.metrics.get(uid) if uid else None
+
+        # 1. Zahur Unfinished Potion: Clean Herb + Vial of water + 200 gp -> Unf Potion (instant noted!)
+        if cm and um and cm.low and um.high and cm.vol_24h >= 100 and um.vol_24h >= 100:
+            fee = 200
+            cost = cm.low + vial_price + fee
+            tax = calculate_ge_tax(um.high, item_name=um.name, exempt=um.is_tax_exempt)
+            net_unit = um.high - tax - cost
+            inst_net = 0
+            if cm.high and um.low:
+                inst_tax = calculate_ge_tax(um.low, item_name=um.name, exempt=um.is_tax_exempt)
+                inst_net = um.low - inst_tax - (cm.high + vial_price + fee)
+            if net_unit > 0 or inst_net > 0:
+                lim = cm.buy_limit if cm.buy_limit > 0 else 11_000
+                results.append(
+                    {
+                        "method": "ZAHUR_UNF",
+                        "method_label": "Zahur Unf. (200gp Instant)",
+                        "level_req": lvl,
+                        "input_id": cm.id,
+                        "input_name": cm.name,
+                        "input_price": cm.low,
+                        "extra_cost": vial_price + fee,
+                        "extra_note": f"Vial ({vial_price}) + Zahur (200)",
+                        "output_id": um.id,
+                        "output_name": um.name,
+                        "output_price": um.high,
+                        "tax": tax,
+                        "net_profit": net_unit,
+                        "instant_profit": inst_net,
+                        "is_instant_profitable": inst_net > 0,
+                        "roi_pct": round((net_unit / max(cost, 1)) * 100.0, 2),
+                        "buy_limit": lim,
+                        "profit_per_limit": net_unit * lim,
+                        "vol_24h": min(cm.vol_24h, um.vol_24h),
+                    }
+                )
+
+        # 2. Grimy -> Clean Herb (0 gp manual clean; also show Zahur 200 gp instant net!)
+        if gm and cm and gm.low and cm.high and gm.vol_24h >= 100 and cm.vol_24h >= 100:
+            tax = calculate_ge_tax(cm.high, item_name=cm.name, exempt=cm.is_tax_exempt)
+            net_manual = cm.high - tax - gm.low
+            net_zahur = net_manual - 200
+            if net_manual > 20:
+                lim = gm.buy_limit if gm.buy_limit > 0 else 11_000
+                results.append(
+                    {
+                        "method": "HERB_CLEAN",
+                        "method_label": "Clean Herb (0gp / Zahur 200gp)",
+                        "level_req": lvl,
+                        "input_id": gm.id,
+                        "input_name": gm.name,
+                        "input_price": gm.low,
+                        "extra_cost": 0,
+                        "extra_note": f"Zahur instant net: {net_zahur:+,} gp",
+                        "output_id": cm.id,
+                        "output_name": cm.name,
+                        "output_price": cm.high,
+                        "tax": tax,
+                        "net_profit": net_manual,
+                        "instant_profit": net_zahur,
+                        "is_instant_profitable": net_zahur > 0,
+                        "roi_pct": round((net_manual / max(gm.low, 1)) * 100.0, 2),
+                        "buy_limit": lim,
+                        "profit_per_limit": net_manual * lim,
+                        "vol_24h": min(gm.vol_24h, cm.vol_24h),
+                    }
+                )
+
+    results.sort(key=lambda x: (x["is_instant_profitable"], x["profit_per_limit"]), reverse=True)
+    return results
+
+
+def scan_processing_and_enchanting(
+    state: MarketState,
+    members: bool = True,
+) -> list[dict[str, Any]]:
+    """Scan Plank Make / Sawmill and Jewelry Enchanting spreads after exact 2% GE tax."""
+    astral_id = state.name_to_id.get("astral rune")
+    cosmic_id = state.name_to_id.get("cosmic rune")
+    astral_m = state.metrics.get(astral_id) if astral_id else None
+    cosmic_m = state.metrics.get(cosmic_id) if cosmic_id else None
+    astral_price = (astral_m.low or astral_m.high or 80) if astral_m else 80
+    cosmic_price = (cosmic_m.low or cosmic_m.high or 130) if cosmic_m else 130
+    nat_price = state.nature_rune_price
+
+    results: list[dict[str, Any]] = []
+
+    # 1. Planks (Sawmill & Lunar Plank Make)
+    if members:
+        for log_name, plank_name, sawmill_fee, pm_fee in PLANK_CATALOG:
+            lid = state.name_to_id.get(log_name.lower())
+            pid = state.name_to_id.get(plank_name.lower())
+            lm = state.metrics.get(lid) if lid else None
+            pm = state.metrics.get(pid) if pid else None
+            if not lm or not pm or not lm.low or not pm.high:
+                continue
+
+            tax = calculate_ge_tax(pm.high, item_name=pm.name, exempt=pm.is_tax_exempt)
+            lim = lm.buy_limit if lm.buy_limit > 0 else 13_000
+
+            # Lunar Plank Make: log + 2 Astral + 1 Nature + pm_fee (earth staff free)
+            pm_runes = 2 * astral_price + nat_price
+            pm_extra = pm_fee + pm_runes
+            pm_cost = lm.low + pm_extra
+            pm_net = pm.high - tax - pm_cost
+            if pm_net > 0:
+                results.append(
+                    {
+                        "category": "PLANK_MAKE",
+                        "method_label": "Plank Make (86 Magic)",
+                        "input_id": lm.id,
+                        "input_name": lm.name,
+                        "input_price": lm.low,
+                        "extra_cost": pm_extra,
+                        "extra_note": f"{pm_fee}gp + 2 Astral + 1 Nat",
+                        "output_id": pm.id,
+                        "output_name": pm.name,
+                        "output_price": pm.high,
+                        "tax": tax,
+                        "net_profit": pm_net,
+                        "roi_pct": round((pm_net / max(pm_cost, 1)) * 100.0, 2),
+                        "buy_limit": lim,
+                        "profit_per_limit": pm_net * lim,
+                        "est_gp_per_hour": pm_net * 1_650,
+                        "vol_24h": min(lm.vol_24h, pm.vol_24h),
+                        "is_tax_exempt": pm.is_tax_exempt,
+                    }
+                )
+
+            # Sawmill (Demon Butler / Woodcutting Guild)
+            sm_cost = lm.low + sawmill_fee
+            sm_net = pm.high - tax - sm_cost
+            if sm_net > 0:
+                results.append(
+                    {
+                        "category": "SAWMILL",
+                        "method_label": "Sawmill / Butler",
+                        "input_id": lm.id,
+                        "input_name": lm.name,
+                        "input_price": lm.low,
+                        "extra_cost": sawmill_fee,
+                        "extra_note": f"Sawmill fee ({sawmill_fee:,} gp)",
+                        "output_id": pm.id,
+                        "output_name": pm.name,
+                        "output_price": pm.high,
+                        "tax": tax,
+                        "net_profit": sm_net,
+                        "roi_pct": round((sm_net / max(sm_cost, 1)) * 100.0, 2),
+                        "buy_limit": lim,
+                        "profit_per_limit": sm_net * lim,
+                        "est_gp_per_hour": sm_net * 4_200,
+                        "vol_24h": min(lm.vol_24h, pm.vol_24h),
+                        "is_tax_exempt": pm.is_tax_exempt,
+                    }
+                )
+
+    # 2. Jewelry Enchanting (1 Cosmic rune + elemental staff)
+    for base_name, ench_name, tier, magic_lvl in ENCHANT_CATALOG:
+        bid = state.name_to_id.get(base_name.lower())
+        eid = state.name_to_id.get(ench_name.lower())
+        bm = state.metrics.get(bid) if bid else None
+        em = state.metrics.get(eid) if eid else None
+        if not bm or not em or not bm.low or not em.high:
+            continue
+        if not members and (bm.members or em.members):
+            continue
+        if min(bm.vol_24h, em.vol_24h) < 50:
+            continue
+
+        cost = bm.low + cosmic_price
+        tax = calculate_ge_tax(em.high, item_name=em.name, exempt=em.is_tax_exempt)
+        net = em.high - tax - cost
+        if net <= 0:
+            continue
+        lim = bm.buy_limit if bm.buy_limit > 0 else 10_000
+        results.append(
+            {
+                "category": "ENCHANT",
+                "method_label": f"Enchant {tier} ({magic_lvl} Magic)",
+                "input_id": bm.id,
+                "input_name": bm.name,
+                "input_price": bm.low,
+                "extra_cost": cosmic_price,
+                "extra_note": f"1 Cosmic ({cosmic_price} gp)",
+                "output_id": em.id,
+                "output_name": em.name,
+                "output_price": em.high,
+                "tax": tax,
+                "net_profit": net,
+                "roi_pct": round((net / max(cost, 1)) * 100.0, 2),
+                "buy_limit": lim,
+                "profit_per_limit": net * lim,
+                "est_gp_per_hour": net * 1_800,
+                "vol_24h": min(bm.vol_24h, em.vol_24h),
+                "is_tax_exempt": em.is_tax_exempt,
+            }
+        )
+
+    results.sort(key=lambda x: x["profit_per_limit"], reverse=True)
+    return results
