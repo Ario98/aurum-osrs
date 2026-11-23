@@ -178,14 +178,14 @@ export function ItemModal({
     const priceChart = createChart(priceContainerRef.current, {
       ...commonOpts,
       width: priceContainerRef.current.clientWidth,
-      height: 295,
+      height: 340,
       timeScale: { visible: false, borderColor: 'rgba(255,255,255,0.07)' },
     });
 
     const volChart = createChart(volContainerRef.current, {
       ...commonOpts,
       width: volContainerRef.current.clientWidth,
-      height: 155,
+      height: 130,
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(255,255,255,0.07)' },
     });
 
@@ -354,8 +354,11 @@ export function ItemModal({
         volChart.applyOptions({ width: volContainerRef.current.clientWidth });
       }
     };
+    const ro = new ResizeObserver(onResize);
+    if (priceContainerRef.current) ro.observe(priceContainerRef.current);
     window.addEventListener('resize', onResize);
     return () => {
+      ro.disconnect();
       window.removeEventListener('resize', onResize);
       priceChart.remove();
       volChart.remove();
@@ -421,11 +424,11 @@ export function ItemModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 p-2 sm:p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[94vh] w-full max-w-[1340px] flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#0a0a0d] shadow-2xl"
+        className="flex max-h-[95vh] w-[96vw] max-w-[1580px] flex-col overflow-hidden rounded-2xl border border-white/[0.12] bg-[#09090c] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Modal Header */}
@@ -501,28 +504,32 @@ export function ItemModal({
           </div>
         </div>
 
-        {/* Body: Spacious 2-Column Layout */}
-        <div className="grid flex-1 grid-cols-1 gap-5 overflow-y-auto overscroll-contain p-5 lg:grid-cols-[1.68fr_1fr]">
-          {/* LEFT COLUMN: Synced 2-Pane Chart (Price + Dedicated Buy/Sell Volume) + Volume Breakdown */}
-          <div className="space-y-3.5 min-w-0">
-            {/* Controls + Live Crosshair Readout */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* Scrollable Body: Full-Width Chart Hero on Top + Balanced 2-Column Lower Deck */}
+        <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-5">
+          {/* 1. FULL-WIDTH UNIFIED TRADINGVIEW-STYLE CHART FRAME */}
+          <div className="overflow-hidden rounded-2xl border border-white/[0.09] bg-[#070709] shadow-lg">
+            {/* Unified Chart Toolbar + Live Hovered OHLC/Spread/Flow Readout */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] bg-[#0c0c10] px-4 py-2.5">
+              {/* Left: Timeframe Pills + Toggles */}
               <div className="flex flex-wrap items-center gap-1.5">
-                {TIMEFRAMES.map((tf) => (
-                  <button
-                    key={tf.key}
-                    onClick={() => setChartWindow(tf.key)}
-                    title={tf.hint}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                      chartWindow === tf.key
-                        ? 'bg-zinc-100 text-zinc-950'
-                        : 'border border-white/[0.06] bg-[#111115] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-                    }`}
-                  >
-                    {tf.label}
-                  </button>
-                ))}
-                <label className="ml-2 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer">
+                <div className="inline-flex items-center rounded-lg border border-white/[0.07] bg-[#060608] p-0.5">
+                  {TIMEFRAMES.map((tf) => (
+                    <button
+                      key={tf.key}
+                      onClick={() => setChartWindow(tf.key)}
+                      title={tf.hint}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                        chartWindow === tf.key
+                          ? 'bg-zinc-100 text-zinc-950'
+                          : 'text-zinc-400 hover:text-zinc-100'
+                      }`}
+                    >
+                      {tf.label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="ml-2 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={showVwapLines}
@@ -531,8 +538,9 @@ export function ItemModal({
                   />
                   <span>VWAP</span>
                 </label>
+
                 <label
-                  className="ml-1 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer"
+                  className="ml-1 flex items-center gap-1.5 text-[11px] text-zinc-400 cursor-pointer select-none"
                   title="Zoom Y-axis to the 2nd–98th percentile so single outlier spikes don't flatten small-tick items like runes"
                 >
                   <input
@@ -543,43 +551,29 @@ export function ItemModal({
                   />
                   <span>Trim Outliers</span>
                 </label>
+
+                {loadingChart && (
+                  <span className="ml-2 text-[11px] font-medium text-amber-300 animate-pulse">Loading...</span>
+                )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-500">
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-amber-400" /> High
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-full bg-zinc-200" /> Low
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-sm bg-emerald-400" /> Buy Vol ↑
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-sm bg-rose-400" /> Sell Vol ↓
-                </span>
-                {loadingChart && <span className="text-amber-300">Loading...</span>}
-              </div>
-            </div>
-
-            {/* Live Hover Legend Strip */}
-            {displayPt && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-[#0f0f13] px-3.5 py-2 text-xs tabular-nums">
-                <span className="text-zinc-400 font-medium">
-                  {new Date(displayPt.timestamp * 1000).toLocaleString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-                <div className="flex flex-wrap items-center gap-4">
+              {/* Right: Integrated Live Hover Readout */}
+              {displayPt && (
+                <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] tabular-nums">
+                  <span className="text-zinc-500 font-medium">
+                    {new Date(displayPt.timestamp * 1000).toLocaleString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
                   <span>
-                    <span className="text-zinc-500">High </span>
+                    <span className="text-zinc-500">H </span>
                     <strong className="text-amber-300">{formatGp(displayPt.avgHighPrice)}</strong>
                   </span>
                   <span>
-                    <span className="text-zinc-500">Low </span>
+                    <span className="text-zinc-500">L </span>
                     <strong className="text-zinc-100">{formatGp(displayPt.avgLowPrice)}</strong>
                   </span>
                   {displayPt.avgHighPrice !== null && displayPt.avgLowPrice !== null && (() => {
@@ -589,159 +583,51 @@ export function ItemModal({
                       <span>
                         <span className="text-zinc-500">Spread </span>
                         <strong className="text-zinc-200">{formatSignedGp(rawSp)}</strong>
-                        <span className={`ml-1 text-[11px] font-semibold ${netSp > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <span className={`ml-1 font-semibold ${netSp > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           (Net {formatSignedGp(netSp)})
                         </span>
                       </span>
                     );
                   })()}
                   <span>
-                    <span className="text-zinc-500">Instant-Buys </span>
-                    <strong className="text-emerald-400">+{displayPt.highPriceVolume.toLocaleString()}</strong>
-                  </span>
-                  <span>
-                    <span className="text-zinc-500">Instant-Sells </span>
-                    <strong className="text-rose-400">-{displayPt.lowPriceVolume.toLocaleString()}</strong>
-                  </span>
-                  <span>
-                    <span className="text-zinc-500">Net Flow </span>
-                    <strong
-                      className={
-                        displayPt.highPriceVolume - displayPt.lowPriceVolume >= 0
-                          ? 'text-emerald-300'
-                          : 'text-rose-300'
-                      }
-                    >
-                      {displayPt.highPriceVolume - displayPt.lowPriceVolume >= 0 ? '+' : ''}
-                      {(displayPt.highPriceVolume - displayPt.lowPriceVolume).toLocaleString()}
-                    </strong>
+                    <span className="text-emerald-400 font-semibold">+{displayPt.highPriceVolume.toLocaleString()}</span>
+                    <span className="text-zinc-600"> / </span>
+                    <span className="text-rose-400 font-semibold">-{displayPt.lowPriceVolume.toLocaleString()}</span>
                   </span>
                 </div>
-              </div>
-            )}
-
-            {/* Synchronized Dual-Pane Chart Container */}
-            <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#070709]">
-              <div ref={priceContainerRef} className="w-full" />
-              <div className="flex items-center justify-between border-y border-white/[0.06] bg-[#0b0b0f] px-3 py-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                <span>Buy vs. Sell Volume (Emerald ↑ = Instant-Buys into Sell Offers · Rose ↓ = Instant-Sells into Buy Offers)</span>
-              </div>
-              <div ref={volContainerRef} className="w-full" />
+              )}
             </div>
 
-            {/* Dedicated Buy vs. Sell Volume Breakdown (5m / 1h / 24h) */}
-            {item && (
-              <div className="rounded-xl border border-white/[0.07] bg-[#0f0f13] p-3.5">
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
-                    Buy vs. Sell Volume Breakdown
-                  </span>
-                  <span className="text-[11px] text-zinc-500 tabular-nums">
-                    5m Vol Spike: <strong className={item.volume_spike_ratio >= 2 ? 'text-amber-300' : 'text-zinc-300'}>{item.volume_spike_ratio.toFixed(1)}×</strong> normal
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                  {volRows.map((row) => {
-                    const buyPct = row.total > 0 ? Math.round((row.buy / row.total) * 100) : 50;
-                    const sellPct = 100 - buyPct;
-                    return (
-                      <div key={row.label} className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5 text-xs tabular-nums">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-zinc-200">{row.label} Window</span>
-                          <span className="text-zinc-400">Total: <strong className="text-zinc-100">{row.total.toLocaleString()}</strong></span>
-                        </div>
-                        <div className="mt-1.5 flex justify-between text-[11px]">
-                          <span className="text-emerald-400 font-semibold">Buy: {row.buy.toLocaleString()} ({buyPct}%)</span>
-                          <span className="text-rose-400 font-semibold">Sell: {row.sell.toLocaleString()} ({sellPct}%)</span>
-                        </div>
-                        <div className="mt-1.5 flex h-2 w-full overflow-hidden rounded-full bg-rose-500/60">
-                          <div className="h-full bg-emerald-400" style={{ width: `${buyPct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {/* Full-Width Price Pane */}
+            <div ref={priceContainerRef} className="w-full" />
 
-            {/* Mean-Reversion / Dump Sniper Explainer Panel */}
-            {item && (
-              <div className="rounded-xl border border-white/[0.08] bg-[#0f0f13] p-3.5 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Flame className="h-4 w-4 text-rose-400" />
-                    <span className="text-xs font-bold text-zinc-100">
-                      Mean-Reversion & Dump Analysis (Hourly Candles)
-                    </span>
-                  </div>
-                  <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${bounceBadgeCls}`}>
-                    Bounce Outlook: {item.dump_bounce_outlook || 'NONE'}
-                  </span>
-                </div>
-
-                <p className="text-[11px] leading-relaxed text-zinc-400 flex items-start gap-1.5">
-                  <Info className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" />
-                  <span>
-                    Standard deviation (σ) is measured over <strong>hourly (/1h) candles</strong>:{' '}
-                    <strong>24h</strong> = last 24 hourly candles (1σ = {formatGp(item.std_24h ? Math.round(item.std_24h) : 0)} gp),{' '}
-                    <strong>7d</strong> = last {item.candles_1h_count || 24} hourly candles (1σ = {formatGp(item.std_7d ? Math.round(item.std_7d) : 0)} gp).{' '}
-                    {item.dump_bounce_reason}
-                  </span>
-                </p>
-
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 text-xs tabular-nums">
-                  <div className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5">
-                    <div className="text-[10px] text-sky-400">24h Hourly VWAP</div>
-                    <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_24h ? Math.round(item.vwap_24h) : null)}</div>
-                    <div className={`text-[10px] ${item.zscore_24h <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
-                      Z = {item.zscore_24h.toFixed(2)}σ
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-white/[0.05] bg-[#070709] p-2.5">
-                    <div className="text-[10px] text-violet-400">7d Hourly VWAP</div>
-                    <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_7d ? Math.round(item.vwap_7d) : null)}</div>
-                    <div className={`text-[10px] ${item.zscore_7d <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
-                      Z = {item.zscore_7d.toFixed(2)}σ
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => item.dump_conservative_target && setSellInput(item.dump_conservative_target)}
-                    disabled={!item.dump_conservative_target}
-                    className="rounded-lg border border-emerald-500/25 bg-emerald-500/10 p-2.5 text-left hover:bg-emerald-500/15 disabled:opacity-40 transition"
-                    title="Click to load Safe Bounce Target into calculator"
-                  >
-                    <div className="text-[10px] text-emerald-300">Safe Bounce Target ↗</div>
-                    <div className="mt-0.5 font-bold text-emerald-200">{formatGp(item.dump_conservative_target)}</div>
-                    <div className="text-[10px] text-emerald-400/80">99% of lower VWAP</div>
-                  </button>
-                  <button
-                    onClick={() => item.dump_full_target && setSellInput(item.dump_full_target)}
-                    disabled={!item.dump_full_target}
-                    className="rounded-lg border border-violet-500/25 bg-violet-500/10 p-2.5 text-left hover:bg-violet-500/15 disabled:opacity-40 transition"
-                    title="Click to load Full 7d Rebound Target into calculator"
-                  >
-                    <div className="text-[10px] text-violet-300">Full 7d Rebound ↗</div>
-                    <div className="mt-0.5 font-bold text-violet-200">{formatGp(item.dump_full_target)}</div>
-                    <div className="text-[10px] text-violet-400/80">98.5% of 7d VWAP</div>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Risk flags if present */}
-            {item && item.manipulation_flags.length > 0 && (
-              <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
-                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                <span>
-                  Caution flags: <strong>{item.manipulation_flags.join(' · ')}</strong>
+            {/* Thin Volume Divider Strip */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-y border-white/[0.06] bg-[#0b0b0f] px-4 py-1 text-[10px] uppercase tracking-wider text-zinc-500">
+              <span>Buy ↑ vs. Sell ↓ Volume</span>
+              <div className="flex items-center gap-3 normal-case tracking-normal text-[10.5px]">
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-400" /> High
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-zinc-200" /> Low
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-emerald-400" /> Instant-Buys ↑
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-rose-400" /> Instant-Sells ↓
                 </span>
               </div>
-            )}
+            </div>
+
+            {/* Full-Width Synced Volume Pane */}
+            <div ref={volContainerRef} className="w-full" />
           </div>
 
-          {/* RIGHT COLUMN: Prominent AI Flip Outlook + Interactive Flip Calculator & Order Ticket */}
-          <div className="flex flex-col justify-between rounded-2xl border border-white/[0.08] bg-[#0f0f13] p-5">
-            <div className="space-y-4">
+          {/* 2. BALANCED 2-COLUMN LOWER DECK */}
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.15fr_1fr] lg:items-start">
+            {/* LEFT DECK: AI Flip Outlook + Volume Breakdown + Mean-Reversion / Dump Stats */}
+            <div className="space-y-4 min-w-0">
               {/* Prominent AI Flip Outlook Card */}
               {item?.ml && (() => {
                 const verdict = getAiVerdict(item.ml);
@@ -754,14 +640,14 @@ export function ItemModal({
                         ? 'border-amber-400/35 bg-amber-500/15 text-amber-200'
                         : 'border-rose-400/35 bg-rose-500/15 text-rose-300';
                 return (
-                  <div className="rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/[0.09] via-[#0c0e14] to-[#0b0b10] p-3.5 space-y-3">
+                  <div className="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/[0.08] via-[#0c0e14] to-[#0b0b10] p-4 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-xs font-bold text-cyan-200">
                         <Brain className="h-4 w-4 text-cyan-400" />
                         AI Flip Outlook
                         <InfoTooltip
                           title="AI Flip Outlook (30d GBDT Model)"
-                          text="Predicts the probability of clearing ≥ +0.5% net profit in 4h or ≥ +1.2% net profit in 12h after the exact 2% GE tax, using 21 historical market features."
+                          text="Predicts the probability of clearing ≥ +0.5% net profit in 4h or ≥ +1.2% net profit in 12h after the exact 2% GE tax, using 23 historical market & buy-limit features."
                           align="left"
                         />
                       </span>
@@ -770,8 +656,8 @@ export function ItemModal({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-xs tabular-nums">
-                      <div className="space-y-1">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs tabular-nums">
+                      <div className="rounded-xl border border-white/[0.06] bg-[#07080c] p-2.5 space-y-1.5">
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-zinc-400">4h Flip Win</span>
                           <span className="font-bold text-zinc-100">{item.ml.prob_4h_pct.toFixed(0)}%</span>
@@ -789,7 +675,7 @@ export function ItemModal({
                           />
                         </div>
                       </div>
-                      <div className="space-y-1">
+                      <div className="rounded-xl border border-white/[0.06] bg-[#07080c] p-2.5 space-y-1.5">
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-zinc-400">12h Overnight</span>
                           <span className="font-bold text-zinc-100">{item.ml.prob_12h_pct.toFixed(0)}%</span>
@@ -807,18 +693,17 @@ export function ItemModal({
                           />
                         </div>
                       </div>
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-[#07080c] px-2.5 py-1.5 text-[11px]">
-                      <span className="text-zinc-400">Expected 12h Post-Tax ROI</span>
-                      <span
-                        className={`font-bold tabular-nums ${
-                          item.ml.pred_12h_roi_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                        }`}
-                      >
-                        {item.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
-                        {item.ml.pred_12h_roi_pct.toFixed(2)}%
-                      </span>
+                      <div className="flex flex-col justify-center rounded-xl border border-white/[0.06] bg-[#07080c] p-2.5">
+                        <span className="text-[10px] text-zinc-400">Expected 12h Net ROI</span>
+                        <span
+                          className={`mt-0.5 text-sm font-bold ${
+                            item.ml.pred_12h_roi_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {item.ml.pred_12h_roi_pct >= 0 ? '+' : ''}
+                          {item.ml.pred_12h_roi_pct.toFixed(2)}%
+                        </span>
+                      </div>
                     </div>
 
                     <p className="text-[11px] leading-relaxed text-zinc-400">{verdict.summary}</p>
@@ -826,6 +711,122 @@ export function ItemModal({
                 );
               })()}
 
+              {/* Buy vs. Sell Volume Breakdown (5m / 1h / 24h) */}
+              {item && (
+                <div className="rounded-2xl border border-white/[0.08] bg-[#0e0e13] p-4">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                      Buy vs. Sell Volume Breakdown
+                    </span>
+                    <span className="text-[11px] text-zinc-500 tabular-nums">
+                      5m Vol Spike:{' '}
+                      <strong className={item.volume_spike_ratio >= 2 ? 'text-amber-300' : 'text-zinc-300'}>
+                        {item.volume_spike_ratio.toFixed(1)}×
+                      </strong>{' '}
+                      normal
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                    {volRows.map((row) => {
+                      const buyPct = row.total > 0 ? Math.round((row.buy / row.total) * 100) : 50;
+                      const sellPct = 100 - buyPct;
+                      return (
+                        <div key={row.label} className="rounded-xl border border-white/[0.05] bg-[#070709] p-2.5 text-xs tabular-nums">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-zinc-200">{row.label}</span>
+                            <span className="text-zinc-400">
+                              <strong className="text-zinc-100">{row.total.toLocaleString()}</strong>
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex justify-between text-[10.5px]">
+                            <span className="text-emerald-400 font-semibold">{buyPct}% B</span>
+                            <span className="text-rose-400 font-semibold">{sellPct}% S</span>
+                          </div>
+                          <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-rose-500/60">
+                            <div className="h-full bg-emerald-400" style={{ width: `${buyPct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Mean-Reversion / Dump Analysis */}
+              {item && (
+                <div className="rounded-2xl border border-white/[0.08] bg-[#0e0e13] p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Flame className="h-4 w-4 text-rose-400" />
+                      <span className="text-xs font-bold text-zinc-100">
+                        VWAP & Mean-Reversion Targets
+                      </span>
+                    </div>
+                    <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${bounceBadgeCls}`}>
+                      Bounce: {item.dump_bounce_outlook || 'NONE'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 text-xs tabular-nums">
+                    <div className="rounded-xl border border-white/[0.05] bg-[#070709] p-2.5">
+                      <div className="text-[10px] text-sky-400">24h VWAP</div>
+                      <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_24h ? Math.round(item.vwap_24h) : null)}</div>
+                      <div className={`text-[10px] ${item.zscore_24h <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
+                        Z = {item.zscore_24h.toFixed(2)}σ
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/[0.05] bg-[#070709] p-2.5">
+                      <div className="text-[10px] text-violet-400">7d VWAP</div>
+                      <div className="mt-0.5 font-bold text-zinc-100">{formatGp(item.vwap_7d ? Math.round(item.vwap_7d) : null)}</div>
+                      <div className={`text-[10px] ${item.zscore_7d <= -1.6 ? 'text-rose-400 font-bold' : 'text-zinc-500'}`}>
+                        Z = {item.zscore_7d.toFixed(2)}σ
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => item.dump_conservative_target && setSellInput(item.dump_conservative_target)}
+                      disabled={!item.dump_conservative_target}
+                      className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-2.5 text-left hover:bg-emerald-500/15 disabled:opacity-40 transition"
+                      title="Click to load Safe Bounce Target into calculator"
+                    >
+                      <div className="text-[10px] text-emerald-300">Safe Bounce ↗</div>
+                      <div className="mt-0.5 font-bold text-emerald-200">{formatGp(item.dump_conservative_target)}</div>
+                      <div className="text-[10px] text-emerald-400/80">99% VWAP</div>
+                    </button>
+                    <button
+                      onClick={() => item.dump_full_target && setSellInput(item.dump_full_target)}
+                      disabled={!item.dump_full_target}
+                      className="rounded-xl border border-violet-500/25 bg-violet-500/10 p-2.5 text-left hover:bg-violet-500/15 disabled:opacity-40 transition"
+                      title="Click to load Full 7d Rebound Target into calculator"
+                    >
+                      <div className="text-[10px] text-violet-300">7d Rebound ↗</div>
+                      <div className="mt-0.5 font-bold text-violet-200">{formatGp(item.dump_full_target)}</div>
+                      <div className="text-[10px] text-violet-400/80">98.5% 7d</div>
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] leading-relaxed text-zinc-400 flex items-start gap-1.5">
+                    <Info className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" />
+                    <span>
+                      Hourly 1σ = {formatGp(item.std_24h ? Math.round(item.std_24h) : 0)} gp (24h) /{' '}
+                      {formatGp(item.std_7d ? Math.round(item.std_7d) : 0)} gp (7d). {item.dump_bounce_reason}
+                    </span>
+                  </p>
+                </div>
+              )}
+
+              {/* Risk flags if present */}
+              {item && item.manipulation_flags.length > 0 && (
+                <div className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-200">
+                  <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                  <span>
+                    Caution flags: <strong>{item.manipulation_flags.join(' · ')}</strong>
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT DECK: Compact Horizontal Flip Calculator & Order Ticket */}
+            <div className="rounded-2xl border border-white/[0.08] bg-[#0e0e13] p-5 space-y-4">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
                   <TrendingUp className="h-4 w-4 text-emerald-400" /> Flip Calculator & Order Ticket
@@ -835,141 +836,148 @@ export function ItemModal({
                 </span>
               </div>
 
-              {/* Buy Price Input */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Buy Price (GP)</label>
-                  <div className="flex items-center gap-1.5 text-[11px]">
-                    {item?.low && (
-                      <>
-                        <button
-                          onClick={() => setBuyInput(item.low!)}
-                          className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                        >
-                          Low
-                        </button>
-                        <button
-                          onClick={() => setBuyInput(item.low! + 1)}
-                          className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                        >
-                          Low +1
-                        </button>
-                      </>
-                    )}
+              {/* Sleek 3-Column Horizontal Inputs: Buy | Sell | Quantity */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {/* Buy Price */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-medium text-zinc-400">Buy (GP)</label>
                     <button
                       onClick={() => copyVal('buy', safeBuy)}
-                      className="flex items-center gap-1 rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                      className="flex items-center gap-0.5 text-[10px] text-zinc-400 hover:text-zinc-100"
                     >
-                      {copied === 'buy' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                      {copied === 'buy' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-2.5 w-2.5" />}
                       Copy
                     </button>
                   </div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={buyInput || ''}
+                    onChange={(e) => setBuyInput(Number(e.target.value))}
+                    className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3 py-2 text-sm font-bold text-zinc-100 outline-none focus:border-white/30 tabular-nums"
+                  />
+                  {item?.low && (
+                    <div className="flex gap-1 text-[10px]">
+                      <button
+                        onClick={() => setBuyInput(item.low!)}
+                        className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                      >
+                        Low
+                      </button>
+                      <button
+                        onClick={() => setBuyInput(item.low! + 1)}
+                        className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                      >
+                        Low +1
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <input
-                  type="number"
-                  min={1}
-                  value={buyInput || ''}
-                  onChange={(e) => setBuyInput(Number(e.target.value))}
-                  className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3.5 py-2.5 text-base font-bold text-zinc-100 outline-none focus:border-white/30 tabular-nums"
-                />
-              </div>
 
-              {/* Sell Price Input */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Target Sell Price (GP)</label>
-                  <div className="flex items-center gap-1.5 text-[11px]">
-                    {item?.high && (
-                      <>
-                        <button
-                          onClick={() => setSellInput(Math.max(1, item.high! - 1))}
-                          className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800 hover:text-white"
-                        >
-                          High -1
-                        </button>
-                        <button
-                          onClick={() => setSellInput(item.high!)}
-                          className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                        >
-                          High
-                        </button>
-                      </>
-                    )}
+                {/* Target Sell Price */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-medium text-zinc-400">Sell (GP)</label>
                     <button
                       onClick={() => copyVal('sell', safeSell)}
-                      className="flex items-center gap-1 rounded-md bg-zinc-900 px-2 py-0.5 text-amber-300 hover:bg-zinc-800"
+                      className="flex items-center gap-0.5 text-[10px] text-amber-300 hover:text-amber-200"
                     >
-                      {copied === 'sell' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                      {copied === 'sell' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-2.5 w-2.5" />}
                       Copy
                     </button>
                   </div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sellInput || ''}
+                    onChange={(e) => setSellInput(Number(e.target.value))}
+                    className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3 py-2 text-sm font-bold text-amber-300 outline-none focus:border-amber-400/50 tabular-nums"
+                  />
+                  {item?.high && (
+                    <div className="flex gap-1 text-[10px]">
+                      <button
+                        onClick={() => setSellInput(Math.max(1, item.high! - 1))}
+                        className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                      >
+                        High -1
+                      </button>
+                      <button
+                        onClick={() => setSellInput(item.high!)}
+                        className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                      >
+                        High
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <input
-                  type="number"
-                  min={1}
-                  value={sellInput || ''}
-                  onChange={(e) => setSellInput(Number(e.target.value))}
-                  className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3.5 py-2.5 text-base font-bold text-amber-300 outline-none focus:border-amber-400/50 tabular-nums"
-                />
-              </div>
 
-              {/* Quantity Input + Quick Sizing */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Quantity</label>
-                  <div className="flex items-center gap-1 text-[11px]">
+                {/* Quantity */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-medium text-zinc-400">Quantity</label>
+                    <span className="text-[10px] text-zinc-500 tabular-nums">
+                      Lim {item?.buy_limit ? item.buy_limit.toLocaleString() : '—'}
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={qtyInput || ''}
+                    onChange={(e) => setQtyInput(Number(e.target.value))}
+                    className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3 py-2 text-sm font-bold text-zinc-100 outline-none focus:border-white/30 tabular-nums"
+                  />
+                  <div className="flex gap-1 text-[10px]">
                     <button
                       onClick={() => {
                         const affordable = safeBuy > 0 ? Math.max(1, Math.floor(slotBudget / safeBuy)) : 1;
                         const lim = item?.buy_limit && item.buy_limit > 0 ? item.buy_limit : affordable;
                         setQtyInput(Math.min(lim, affordable));
                       }}
-                      className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                      className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-300 hover:bg-zinc-800"
                     >
-                      Slot Budget
+                      Slot
                     </button>
                     {item?.buy_limit && item.buy_limit > 0 && (
                       <button
                         onClick={() => setQtyInput(item.buy_limit)}
-                        className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                        className="flex-1 rounded-md bg-zinc-900 py-1 text-zinc-300 hover:bg-zinc-800"
                       >
-                        Max ({item.buy_limit.toLocaleString()})
+                        Max
                       </button>
                     )}
                     <button
                       onClick={() => setQtyInput(1)}
-                      className="rounded-md bg-zinc-900 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800"
+                      className="rounded-md bg-zinc-900 px-2 py-1 text-zinc-400 hover:bg-zinc-800"
                     >
                       1x
                     </button>
                   </div>
                 </div>
-                <input
-                  type="number"
-                  min={1}
-                  value={qtyInput || ''}
-                  onChange={(e) => setQtyInput(Number(e.target.value))}
-                  className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3.5 py-2.5 text-base font-bold text-zinc-100 outline-none focus:border-white/30 tabular-nums"
-                />
               </div>
 
               {/* Live 2% Post-Tax Profit Breakdown */}
-              <div className="rounded-xl border border-white/[0.08] bg-[#060608] p-4 space-y-2.5 text-xs tabular-nums">
-                <div className="flex justify-between text-zinc-400">
-                  <span>Capital Required</span>
-                  <strong className="text-zinc-100">{formatGp(totalCost)} gp</strong>
+              <div className="rounded-xl border border-white/[0.08] bg-[#060608] p-4 space-y-2 text-xs tabular-nums">
+                <div className="grid grid-cols-3 gap-2 border-b border-white/[0.07] pb-3 text-center">
+                  <div>
+                    <div className="text-[10px] text-zinc-500">Capital</div>
+                    <div className="mt-0.5 font-bold text-zinc-100">{formatGp(totalCost, true)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-zinc-500">2% GE Tax</div>
+                    <div className="mt-0.5 font-bold text-rose-400">
+                      {item?.is_tax_exempt ? '0 (Exempt)' : `-${formatGp(totalTax, true)}`}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-zinc-500">Net / Unit</div>
+                    <div className={`mt-0.5 font-bold ${netUnit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatSignedGp(netUnit)}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between text-zinc-400">
-                  <span>2% GE Tax ({item?.is_tax_exempt ? 'Exempt' : `${formatGp(taxUnit)}/ea`})</span>
-                  <strong className="text-rose-400">-{formatGp(totalTax)} gp</strong>
-                </div>
-                <div className="flex justify-between text-zinc-400">
-                  <span>Net Margin / Unit</span>
-                  <strong className={netUnit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                    {formatSignedGp(netUnit)} gp
-                  </strong>
-                </div>
-                <div className="border-t border-white/[0.08] pt-2.5 flex items-baseline justify-between">
+
+                <div className="pt-1 flex items-baseline justify-between">
                   <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Est. Net Profit</span>
                   <div className="text-right">
                     <div className={`text-xl font-black ${totalNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -980,9 +988,9 @@ export function ItemModal({
                 </div>
               </div>
 
-              {/* Compact Strategy Scores + High Alch */}
+              {/* Strategy Scores Strip */}
               {item && (
-                <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/[0.07] bg-[#060608] p-3 text-center text-xs tabular-nums">
+                <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/[0.07] bg-[#060608] p-2.5 text-center text-xs tabular-nums">
                   <div>
                     <div className="text-[9px] text-zinc-500">FAST</div>
                     <div className="mt-0.5 font-bold text-emerald-400">{Math.round(item.fast_flip_score)}</div>
@@ -1001,46 +1009,46 @@ export function ItemModal({
                   </div>
                 </div>
               )}
-            </div>
 
-            {/* Coach Mode Selector + Submit CTA */}
-            <div className="mt-5 space-y-2.5">
-              <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-white/[0.08] bg-[#060608] p-1 text-xs">
+              {/* Coach Mode Selector + Submit CTA */}
+              <div className="space-y-2.5 pt-1">
+                <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-white/[0.08] bg-[#060608] p-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setFlipMode('active')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
+                      flipMode === 'active'
+                        ? 'bg-white/[0.12] text-white'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    <Zap className="h-3.5 w-3.5 text-amber-400" /> Active Coach
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFlipMode('overnight')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
+                      flipMode === 'overnight'
+                        ? 'bg-indigo-500/25 text-indigo-200'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    <Moon className="h-3.5 w-3.5 text-indigo-300" /> Overnight Coach
+                  </button>
+                </div>
                 <button
-                  type="button"
-                  onClick={() => setFlipMode('active')}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
-                    flipMode === 'active'
-                      ? 'bg-white/[0.12] text-white'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
+                  onClick={handleSubmit}
+                  disabled={submitting || slotsFull || safeBuy <= 0 || safeSell <= 0}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-100 py-3 text-sm font-bold text-zinc-950 hover:bg-white disabled:opacity-40 transition"
                 >
-                  <Zap className="h-3.5 w-3.5 text-amber-400" /> Active Coach
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFlipMode('overnight')}
-                  className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
-                    flipMode === 'overnight'
-                      ? 'bg-indigo-500/25 text-indigo-200'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  <Moon className="h-3.5 w-3.5 text-indigo-300" /> Overnight Coach
+                  <Play className="h-4 w-4 fill-current" />
+                  {slotsFull
+                    ? 'All 8 GE Slots Full'
+                    : submitting
+                      ? 'Assigning Slot...'
+                      : `Start ${flipMode === 'overnight' ? 'Overnight' : 'Flip'} (${safeQty.toLocaleString()}x @ ${formatGp(safeBuy)})`}
                 </button>
               </div>
-              <button
-                onClick={handleSubmit}
-                disabled={submitting || slotsFull || safeBuy <= 0 || safeSell <= 0}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-100 py-3 text-sm font-bold text-zinc-950 hover:bg-white disabled:opacity-40 transition"
-              >
-                <Play className="h-4 w-4 fill-current" />
-                {slotsFull
-                  ? 'All 8 GE Slots Full'
-                  : submitting
-                    ? 'Assigning Slot...'
-                    : `Start ${flipMode === 'overnight' ? 'Overnight' : 'Flip'} (${safeQty.toLocaleString()}x @ ${formatGp(safeBuy)})`}
-              </button>
             </div>
           </div>
         </div>
