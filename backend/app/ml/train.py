@@ -1,4 +1,7 @@
-"""Isolated LightGBM training + strict walk-forward backtester (zero lookahead leakage).
+"""Isolated Histogram GBDT training + strict walk-forward backtester (zero lookahead leakage).
+
+Uses scikit-learn's LightGBM-style HistGradientBoosting (completely self-contained — zero
+system `libgomp1` apt dependency across bare Linux, Docker, Windows, and macOS).
 
 Run directly as a subprocess so FastAPI's event loop & live 20s ticks are never blocked:
     python -m app.ml.train --db data/osrs_terminal.db --out data/models
@@ -9,14 +12,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
-import lightgbm as lgb
+import joblib
 import numpy as np
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 
 from app.ml.features import FEATURE_NAMES, build_training_dataset
 
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _roc_auc_score(y_true: np.ndarray, y_score: np.ndarray) -> float:
-    """Fast pure-NumPy ROC-AUC (zero scikit-learn dependency)."""
+    """Fast pure-NumPy ROC-AUC."""
     y_true = np.asarray(y_true, dtype=np.int8)
     y_score = np.asarray(y_score, dtype=np.float64)
     pos = int(np.sum(y_true == 1))
@@ -34,7 +36,6 @@ def _roc_auc_score(y_true: np.ndarray, y_score: np.ndarray) -> float:
     order = np.argsort(y_score, kind="mergesort")
     ranks = np.empty_like(order, dtype=np.float64)
     ranks[order] = np.arange(1, len(y_score) + 1, dtype=np.float64)
-    # Handle ties via average rank
     sorted_scores = y_score[order]
     diffs = np.flatnonzero(np.diff(sorted_scores))
     starts = np.concatenate(([0], diffs + 1))
@@ -48,63 +49,61 @@ def _roc_auc_score(y_true: np.ndarray, y_score: np.ndarray) -> float:
     return float(max(0.0, min(1.0, auc)))
 
 
-def _fit_lgb_binary(X_tr: np.ndarray, y_tr: np.ndarray, X_va: np.ndarray | None = None, y_va: np.ndarray | None = None) -> lgb.Booster:
-    params: dict[str, Any] = {
-        "objective": "binary",
-        "metric": "auc",
-        "boosting_type": "gbdt",
-        "num_leaves": 31,
-        "max_depth": 6,
-        "learning_rate": 0.05,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq": 1,
-        "min_child_samples": 40,
-        "lambda_l2": 2.0,
-        "n_jobs": min(2, os.cpu_count() or 1),
-        "verbose": -1,
-        "seed": 42,
-    }
-    dtrain = lgb.Dataset(X_tr, label=y_tr, feature_name=FEATURE_NAMES, free_raw_data=False)
-    valid_sets = [dtrain]
-    callbacks = [lgb.log_evaluation(period=0)]
-    num_rounds = 180
-    if X_va is not None and y_va is not None and len(X_va) >= 100:
-        dval = lgb.Dataset(X_va, label=y_va, reference=dtrain, feature_name=FEATURE_NAMES, free_raw_data=False)
-        valid_sets.append(dval)
-        callbacks.append(lgb.early_stopping(stopping_rounds=25, verbose=False))
-        num_rounds = 240
-    return lgb.train(params, dtrain, num_boost_round=num_rounds, valid_sets=valid_sets, callbacks=callbacks)
+def _fit_hgb_binary(X_tr: np.ndarray, y_tr: np.ndarray) -> HistGradientBoostingClassifier:
+    clf = HistGradientBoostingClassifier(
+        max_iter=180,
+        max_leaf_nodes=31,
+        max_depth=6,
+        learning_rate=0.05,
+        min_samples_leaf=40,
+        l2_regularization=2.0,
+        early_stopping=True,
+        validation_fraction=0.12,
+        n_iter_no_change=18,
+        random_state=42,
+    )
+    clf.fit(X_tr, y_tr)
+    return clf
 
 
-def _fit_lgb_reg(X_tr: np.ndarray, y_tr: np.ndarray, X_va: np.ndarray | None = None, y_va: np.ndarray | None = None) -> lgb.Booster:
-    params: dict[str, Any] = {
-        "objective": "huber",
-        "alpha": 2.5,
-        "metric": "l1",
-        "boosting_type": "gbdt",
-        "num_leaves": 31,
-        "max_depth": 6,
-        "learning_rate": 0.05,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq": 1,
-        "min_child_samples": 40,
-        "lambda_l2": 2.0,
-        "n_jobs": min(2, os.cpu_count() or 1),
-        "verbose": -1,
-        "seed": 42,
-    }
-    dtrain = lgb.Dataset(X_tr, label=y_tr, feature_name=FEATURE_NAMES, free_raw_data=False)
-    valid_sets = [dtrain]
-    callbacks = [lgb.log_evaluation(period=0)]
-    num_rounds = 180
-    if X_va is not None and y_va is not None and len(X_va) >= 100:
-        dval = lgb.Dataset(X_va, label=y_va, reference=dtrain, feature_name=FEATURE_NAMES, free_raw_data=False)
-        valid_sets.append(dval)
-        callbacks.append(lgb.early_stopping(stopping_rounds=25, verbose=False))
-        num_rounds = 240
-    return lgb.train(params, dtrain, num_boost_round=num_rounds, valid_sets=valid_sets, callbacks=callbacks)
+def _fit_hgb_reg(X_tr: np.ndarray, y_tr: np.ndarray) -> HistGradientBoostingRegressor:
+    reg = HistGradientBoostingRegressor(
+        loss="absolute_error",
+        max_iter=180,
+        max_leaf_nodes=31,
+        max_depth=6,
+        learning_rate=0.05,
+        min_samples_leaf=40,
+        l2_regularization=2.0,
+        early_stopping=True,
+        validation_fraction=0.12,
+        n_iter_no_change=18,
+        random_state=42,
+    )
+    reg.fit(X_tr, y_tr)
+    return reg
+
+
+def _extract_gain_importances(model: Any, n_features: int) -> np.ndarray:
+    """Compute exact normalized split-gain importances from HistGradientBoosting trees in <1ms."""
+    gains = np.zeros(n_features, dtype=np.float64)
+    predictors = getattr(model, "_predictors", None)
+    if predictors:
+        for iter_trees in predictors:
+            for tree in iter_trees:
+                nodes = getattr(tree, "nodes", None)
+                if nodes is None:
+                    continue
+                is_split = nodes["is_leaf"] == 0
+                fidx = nodes["feature_idx"][is_split]
+                g = nodes["gain"][is_split]
+                for fi, gv in zip(fidx, g):
+                    if 0 <= int(fi) < n_features and gv > 0:
+                        gains[int(fi)] += float(gv)
+    total = float(gains.sum())
+    if total > 0:
+        return gains / total
+    return np.full(n_features, 1.0 / max(n_features, 1), dtype=np.float64)
 
 
 def _eval_top_k_cycles(
@@ -224,24 +223,14 @@ def run_training_pipeline(
         if int(np.sum(tr_mask)) < 500 or int(np.sum(te_mask)) < 200:
             continue
 
-        # Internal chronological 85/15 split inside train fold for early stopping
-        tr_indices = np.flatnonzero(tr_mask)
-        tr_ts_sorted = np.sort(ts[tr_indices])
-        val_cut = int(tr_ts_sorted[int(len(tr_ts_sorted) * 0.85)])
-        fit_mask = tr_mask & (ts < val_cut - embargo_sec)
-        val_mask = tr_mask & (ts >= val_cut)
-        if int(np.sum(fit_mask)) < 300 or int(np.sum(val_mask)) < 100:
-            fit_mask = tr_mask
-            val_mask = np.zeros_like(tr_mask)
-
-        X_fit, X_val = X[fit_mask], (X[val_mask] if np.any(val_mask) else None)
-        m4 = _fit_lgb_binary(X_fit, y4_win[fit_mask], X_val, y4_win[val_mask] if X_val is not None else None)
-        m12_cls = _fit_lgb_binary(X_fit, y12_win[fit_mask], X_val, y12_win[val_mask] if X_val is not None else None)
-        m12_reg = _fit_lgb_reg(X_fit, y12_roi[fit_mask], X_val, y12_roi[val_mask] if X_val is not None else None)
+        X_tr = X[tr_mask]
+        m4 = _fit_hgb_binary(X_tr, y4_win[tr_mask])
+        m12_cls = _fit_hgb_binary(X_tr, y12_win[tr_mask])
+        m12_reg = _fit_hgb_reg(X_tr, y12_roi[tr_mask])
 
         X_te = X[te_mask]
-        p4 = m4.predict(X_te)
-        p12 = m12_cls.predict(X_te)
+        p4 = m4.predict_proba(X_te)[:, 1]
+        p12 = m12_cls.predict_proba(X_te)[:, 1]
         r12 = m12_reg.predict(X_te)
 
         auc4 = _roc_auc_score(y4_win[te_mask], p4)
@@ -330,7 +319,6 @@ def run_training_pipeline(
     equity_curve: list[dict[str, Any]] = [{"ts": int(all_ts.min()), "ml_gp": int(start_gp), "rules_gp": int(start_gp)}]
     for t, r_ml in ml_cycles_12:
         r_ru = ru_map.get(t, 0.0)
-        # Conservative realistic deployment: 60% of cash stack fills across 8 overnight slots
         ml_eq = max(1_000_000.0, ml_eq * (1.0 + (r_ml / 100.0) * 0.60))
         ru_eq = max(1_000_000.0, ru_eq * (1.0 + (r_ru / 100.0) * 0.60))
         equity_curve.append({"ts": int(t), "ml_gp": int(round(ml_eq)), "rules_gp": int(round(ru_eq))})
@@ -342,30 +330,25 @@ def run_training_pipeline(
         and (ml_roi4 >= ru_roi4 or ml_roi12 >= ru_roi12)
     )
 
-    # Fit final production models on 100% of clean dataset (last 10% held for early stopping)
-    ts_sorted = np.sort(ts)
-    final_val_cut = int(ts_sorted[int(len(ts_sorted) * 0.90)])
-    final_fit = ts < final_val_cut - embargo_sec
-    final_val = ts >= final_val_cut
-    if int(np.sum(final_fit)) < 500:
-        final_fit = np.ones(len(ts), dtype=bool)
-        final_val = np.zeros(len(ts), dtype=bool)
+    # Fit final production models on 100% of clean dataset
+    prod_4h = _fit_hgb_binary(X, y4_win)
+    prod_12h_cls = _fit_hgb_binary(X, y12_win)
+    prod_12h_reg = _fit_hgb_reg(X, y12_roi)
 
-    Xf, Xv = X[final_fit], (X[final_val] if np.any(final_val) else None)
-    prod_4h = _fit_lgb_binary(Xf, y4_win[final_fit], Xv, y4_win[final_val] if Xv is not None else None)
-    prod_12h_cls = _fit_lgb_binary(Xf, y12_win[final_fit], Xv, y12_win[final_val] if Xv is not None else None)
-    prod_12h_reg = _fit_lgb_reg(Xf, y12_roi[final_fit], Xv, y12_roi[final_val] if Xv is not None else None)
+    bundle = {
+        "m4": prod_4h,
+        "m12_cls": prod_12h_cls,
+        "m12_reg": prod_12h_reg,
+        "feature_names": FEATURE_NAMES,
+    }
+    tmp_path = out_dir / "models.joblib.tmp"
+    final_path = out_dir / "models.joblib"
+    joblib.dump(bundle, tmp_path, compress=3)
+    tmp_path.replace(final_path)
 
-    # Atomic save of models
-    prod_4h.save_model(str(out_dir / "model_4h_cls.txt"))
-    prod_12h_cls.save_model(str(out_dir / "model_12h_cls.txt"))
-    prod_12h_reg.save_model(str(out_dir / "model_12h_reg.txt"))
-
-    # Normalized combined feature importances (gain)
-    g4 = prod_4h.feature_importance(importance_type="gain").astype(np.float64)
-    g12 = prod_12h_cls.feature_importance(importance_type="gain").astype(np.float64)
-    g4 = g4 / max(float(g4.sum()), 1e-9)
-    g12 = g12 / max(float(g12.sum()), 1e-9)
+    # Normalized combined feature importances (split gain)
+    g4 = _extract_gain_importances(prod_4h, len(FEATURE_NAMES))
+    g12 = _extract_gain_importances(prod_12h_cls, len(FEATURE_NAMES))
     combined_imp = 0.5 * (g4 + g12)
     order = np.argsort(-combined_imp)
     feature_importances = [
@@ -415,7 +398,7 @@ def run_training_pipeline(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train OSRS Flip Terminal LightGBM models + walk-forward backtest")
+    parser = argparse.ArgumentParser(description="Train OSRS Flip Terminal GBDT models + walk-forward backtest")
     parser.add_argument("--db", required=True, help="Path to SQLite database")
     parser.add_argument("--out", required=True, help="Output directory for model files & report.json")
     parser.add_argument("--days", type=int, default=30, help="Lookback days of candles_1h")

@@ -178,7 +178,7 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm font-bold text-zinc-100">Dual-Horizon LightGBM & Walk-Forward Backtest</h2>
+                <h2 className="text-sm font-bold text-zinc-100">Dual-Horizon GBDT & Walk-Forward Backtest</h2>
                 {status?.training_in_progress ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-sky-300">
                     <RefreshCw className="h-3 w-3 animate-spin" /> Training Worker Running
@@ -257,7 +257,7 @@ export function MLBacktest({ onModelUpdated }: { onModelUpdated?: () => void }) 
           <div className="text-sm font-semibold text-zinc-100">Ready for Walk-Forward Training</div>
           <p className="mx-auto max-w-lg text-xs text-zinc-400 leading-relaxed">
             {report?.reason ||
-              'Click "Retrain & Backtest Now" to train 4h Active/Bounce and 12h Overnight LightGBM models across your 30-day hourly dataset with strict 12-hour embargoed out-of-sample validation.'}
+              'Click "Retrain & Backtest Now" to train 4h Active/Bounce and 12h Overnight Gradient-Boosted models across your 30-day hourly dataset with strict 12-hour embargoed out-of-sample validation.'}
           </p>
         </div>
       ) : (

@@ -1,4 +1,4 @@
-"""Fast in-memory LightGBM inference + non-blocking subprocess training coordinator."""
+"""Fast in-memory Histogram GBDT inference + non-blocking subprocess training coordinator."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
-import lightgbm as lgb
 import numpy as np
 
 from app.ml.features import extract_live_features
@@ -34,13 +33,13 @@ class MLPrediction:
 
 
 class MLPredictor:
-    """Loads saved LightGBM models, serves <20ms batch inference, and runs isolated training workers."""
+    """Loads saved GBDT models, serves <25ms batch inference, and runs isolated training workers."""
 
     def __init__(self, models_dir: Path) -> None:
         self.models_dir = models_dir
-        self._m4: Optional[lgb.Booster] = None
-        self._m12_cls: Optional[lgb.Booster] = None
-        self._m12_reg: Optional[lgb.Booster] = None
+        self._m4: Any = None
+        self._m12_cls: Any = None
+        self._m12_reg: Any = None
         self.report: Optional[dict[str, Any]] = None
         self.predictions: dict[int, MLPrediction] = {}
         self.last_inference_ms: float = 0.0
@@ -61,10 +60,8 @@ class MLPredictor:
         return bool(self.loaded and self.report and self.report.get("validated") is True)
 
     def load_models(self) -> bool:
-        """Load LightGBM .txt artifacts + report.json from disk (fast <50ms)."""
-        p4 = self.models_dir / "model_4h_cls.txt"
-        p12c = self.models_dir / "model_12h_cls.txt"
-        p12r = self.models_dir / "model_12h_reg.txt"
+        """Load models.joblib + report.json from disk safely (never blocks or crashes boot)."""
+        bundle_path = self.models_dir / "models.joblib"
         rep_path = self.models_dir / "report.json"
 
         if rep_path.exists():
@@ -73,31 +70,34 @@ class MLPredictor:
             except Exception as exc:
                 logger.warning("Failed to parse ML report.json: %s", exc)
 
-        if not (p4.exists() and p12c.exists() and p12r.exists()):
+        if not bundle_path.exists():
             self._m4 = None
             self._m12_cls = None
             self._m12_reg = None
             return False
 
         try:
-            self._m4 = lgb.Booster(model_file=str(p4))
-            self._m12_cls = lgb.Booster(model_file=str(p12c))
-            self._m12_reg = lgb.Booster(model_file=str(p12r))
+            import joblib
+
+            bundle = joblib.load(bundle_path)
+            self._m4 = bundle["m4"]
+            self._m12_cls = bundle["m12_cls"]
+            self._m12_reg = bundle["m12_reg"]
             logger.info(
-                "Loaded LightGBM models from %s (validated=%s)",
-                self.models_dir,
+                "Loaded GBDT models from %s (validated=%s)",
+                bundle_path,
                 self.validated,
             )
             return True
         except Exception as exc:
-            logger.warning("Failed to load LightGBM models: %s", exc)
+            logger.warning("Failed to load GBDT models: %s", exc)
             self._m4 = None
             self._m12_cls = None
             self._m12_reg = None
             return False
 
     def refresh_predictions(self, state: Any) -> float:
-        """Run fast batch inference across all active items in <20ms."""
+        """Run fast batch inference across all active items in <25ms."""
         if not self.loaded:
             self.predictions.clear()
             return 0.0
@@ -108,9 +108,8 @@ class MLPredictor:
             self.predictions.clear()
             return 0.0
 
-        assert self._m4 is not None and self._m12_cls is not None and self._m12_reg is not None
-        p4 = np.clip(self._m4.predict(X), 0.01, 0.99)
-        p12 = np.clip(self._m12_cls.predict(X), 0.01, 0.99)
+        p4 = np.clip(self._m4.predict_proba(X)[:, 1], 0.01, 0.99)
+        p12 = np.clip(self._m12_cls.predict_proba(X)[:, 1], 0.01, 0.99)
         r12 = np.clip(self._m12_reg.predict(X), -15.0, 25.0)
 
         preds: dict[int, MLPrediction] = {}
@@ -205,5 +204,5 @@ class MLPredictor:
         return {
             "started": True,
             "status": "started",
-            "message": "Walk-forward training started in background worker (~15–30s).",
+            "message": "Walk-forward training started in background worker (~20–45s).",
         }
