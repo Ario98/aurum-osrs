@@ -207,4 +207,9 @@ export const api = {
       '/api/system/actions/checkpoint',
       { method: 'POST' },
     ),
+  actionBackupDb: () =>
+    request<{ ok: boolean; filename: string; size_mb: number; elapsed_ms: number; pruned: number; total_backups: number }>(
+      '/api/system/actions/backup',
+      { method: 'POST' },
+    ),
 };

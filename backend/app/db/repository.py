@@ -767,3 +767,42 @@ class Repository:
             "log_frames": int(row[1]),
             "checkpointed_frames": int(row[2]),
         }
+
+    async def create_online_backup(self, backup_dir: Any, keep_last: int = 14) -> dict[str, Any]:
+        """Create a consistent hot SQLite backup via SQLite's online backup API (cross-platform)."""
+        from datetime import datetime, timezone
+        from pathlib import Path
+        import aiosqlite
+
+        dest_dir = Path(backup_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        dest_file = dest_dir / f"osrs_terminal_{stamp}.db"
+
+        t0 = time.perf_counter()
+        async with aiosqlite.connect(str(dest_file)) as target_conn:
+            await self.db.conn.backup(target_conn)
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+
+        # Prune oldest backups beyond retention limit
+        existing = sorted(
+            [p for p in dest_dir.iterdir() if p.is_file() and p.name.startswith("osrs_terminal_") and p.suffix == ".db"],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        pruned = 0
+        for old in existing[keep_last:]:
+            try:
+                old.unlink()
+                pruned += 1
+            except OSError:
+                pass
+
+        size_mb = round(dest_file.stat().st_size / (1024 * 1024), 2) if dest_file.exists() else 0.0
+        return {
+            "filename": dest_file.name,
+            "size_mb": size_mb,
+            "elapsed_ms": elapsed_ms,
+            "pruned": pruned,
+            "total_backups": min(len(existing), keep_last),
+        }

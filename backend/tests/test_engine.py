@@ -393,7 +393,8 @@ async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["overall_status"] in ("healthy", "degraded")
     assert body["engine"]["items_tracked"] == len(state.metrics)
     assert len(body["engine"]["recompute_history"]) >= 1
-    assert "ml_readiness" in body["dataset"]
+    assert "pipeline_health" in body["dataset"]
+    assert body["runtime"]["platform"]
 
     chk = client.post("/api/system/actions/checkpoint")
     assert chk.status_code == 200
@@ -402,6 +403,11 @@ async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.Mon
     rol = client.post("/api/system/actions/rollup")
     assert rol.status_code == 200
     assert rol.json()["ok"] is True
+
+    bak = client.post("/api/system/actions/backup")
+    assert bak.status_code == 200
+    assert bak.json()["ok"] is True
+    assert bak.json()["filename"].startswith("osrs_terminal_")
 
     await alerts.close()
     await db.close()

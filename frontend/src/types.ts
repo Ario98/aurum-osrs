@@ -425,9 +425,9 @@ export interface SystemHealthResponse {
     seasonality_30d_items: number;
     db_size_mb: number;
     wal_size_mb: number;
-    ml_readiness: {
+    pipeline_health: {
       score: number;
-      ready: boolean;
+      healthy: boolean;
       checks: Array<{
         label: string;
         ok: boolean;
@@ -459,7 +459,8 @@ export interface SystemHealthResponse {
       stage: string;
     };
   };
-  vps: {
+  runtime: {
+    platform: string;
     uptime_sec: number;
     process_rss_mb: number | null;
     system_ram_used_mb: number | null;

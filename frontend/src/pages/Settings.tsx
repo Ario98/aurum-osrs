@@ -268,7 +268,7 @@ export function Settings({ activeSubTab, onChangeSubTab, onSettingsSaved }: Prop
         </ol>
 
         <p className="text-[11px] text-zinc-500">
-          When deployed to your Hetzner VPS with HTTPS, this URL automatically uses your public domain so RuneLite syncs from anywhere.
+          When hosted behind HTTPS (e.g. Tailscale Serve, Cloudflare Tunnel, or a reverse proxy), this URL automatically uses your public domain so RuneLite syncs from anywhere.
         </p>
       </div>
     </div>

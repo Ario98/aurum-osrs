@@ -365,7 +365,7 @@ export default function App() {
     { key: 'scanner', label: 'Market Scanner', shortLabel: 'Scan', icon: <Search className="h-[18px] w-[18px]" /> },
     { key: 'arbitrage', label: 'Arbitrage', shortLabel: 'Arb', icon: <FlaskConical className="h-[18px] w-[18px]" /> },
     { key: 'journal', label: 'Journal & Limits', shortLabel: 'Journal', icon: <BookOpen className="h-[18px] w-[18px]" /> },
-    { key: 'settings', label: 'Settings & Dink', shortLabel: 'Config', icon: <SettingsIcon className="h-[18px] w-[18px]" /> },
+    { key: 'settings', label: 'Settings & System', shortLabel: 'Settings', icon: <SettingsIcon className="h-[18px] w-[18px]" /> },
   ];
 
   return (

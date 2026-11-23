@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform as py_platform
 import shutil
 import time
 from pathlib import Path
@@ -22,6 +23,20 @@ DB_STATS_CACHE_TTL_SEC = 30.0
 def invalidate_db_stats_cache() -> None:
     _DB_STATS_CACHE["ts"] = 0.0
     _DB_STATS_CACHE["data"] = None
+
+
+def _detect_platform() -> str:
+    """Detect runtime host platform cleanly across Docker, Linux, macOS, and Windows."""
+    sys_name = py_platform.system()
+    if sys_name == "Linux":
+        if Path("/.dockerenv").exists():
+            return "Docker (Linux)"
+        return "Linux"
+    if sys_name == "Darwin":
+        return "macOS"
+    if sys_name == "Windows":
+        return "Windows"
+    return sys_name or "Unknown"
 
 
 def _read_process_rss_mb() -> Optional[float]:
@@ -88,17 +103,29 @@ def _read_disk_gb(path: Path) -> tuple[Optional[float], Optional[float]]:
         return None, None
 
 
+def _resolve_backup_dir(db_path: Path) -> Path:
+    """Use sibling `backups/` directory next to `data/` when present, else `db_path.parent / backups`."""
+    sibling = db_path.parent.parent / "backups"
+    if sibling.is_dir():
+        return sibling
+    if db_path.parent.name == "data":
+        return sibling
+    return db_path.parent / "backups"
+
+
 def _scan_latest_backup(db_path: Path) -> dict[str, Any]:
-    """Look for daily SQLite backups in sibling/parent backups/ directories."""
+    """Look for SQLite backup files in standard local/server backup directories."""
     candidates = [
         db_path.parent.parent / "backups",
         db_path.parent / "backups",
     ]
     files: list[Path] = []
+    seen: set[Path] = set()
     for folder in candidates:
         if folder.is_dir():
             for p in folder.iterdir():
-                if p.is_file() and any(ext in p.name for ext in (".db", ".sqlite", ".gz", ".bak")):
+                if p.is_file() and p not in seen and any(ext in p.name for ext in (".db", ".sqlite", ".gz", ".bak")):
+                    seen.add(p)
                     files.append(p)
     if not files:
         return {
@@ -138,7 +165,7 @@ def compute_quick_health(state: Any, wiki: Any, db_path: Path) -> tuple[str, lis
 
     free_gb, _ = _read_disk_gb(db_path)
     if free_gb is not None and free_gb < 2.0:
-        issues.append(f"Low VPS disk space ({free_gb} GB free)")
+        issues.append(f"Low disk space ({free_gb} GB free)")
 
     backup = _scan_latest_backup(db_path)
     if backup["found"] and backup["age_hours"] is not None and backup["age_hours"] > 48.0:
@@ -183,43 +210,43 @@ async def get_system_health(
     db_size_bytes = db_path.stat().st_size if db_path.exists() else 0
     wal_size_bytes = wal_path.stat().st_size if wal_path.exists() else 0
 
-    # Phase 5 ML readiness checklist & composite score (0-100)
+    # Data Pipeline Health checklist & composite score (0-100)
     cov_30d = float(db_stats["coverage_30d_pct"])
+    missing_1h = int(db_stats["missing_1h_30d"])
     c24_buckets = int(db_stats["candles_24h"]["buckets"])
     seas_items = len(state._seasonality_30d)
-    c1_rows = int(db_stats["candles_1h"]["rows"])
 
-    ml_checks = [
+    pipeline_checks = [
         {
             "label": "30-day hourly candle history (>=95% coverage)",
             "ok": cov_30d >= 95.0,
             "detail": f"{db_stats['present_1h_30d']}/{db_stats['expected_1h_30d']} buckets ({cov_30d}%)",
         },
         {
-            "label": "Permanent daily candles_24h rollups (>=25 days)",
+            "label": "Daily 24h candle rollups (>=25 days)",
             "ok": c24_buckets >= 25,
             "detail": f"{c24_buckets} daily buckets ({db_stats['candles_24h']['rows']:,} rows)",
         },
         {
-            "label": "30-day hour-of-day seasonality computed",
+            "label": "30-day hour-of-day seasonality profiles",
             "ok": seas_items >= 1000,
             "detail": f"{seas_items:,} active items",
         },
         {
-            "label": "1.5M+ hourly training samples in SQLite",
-            "ok": c1_rows >= 1_500_000,
-            "detail": f"{c1_rows:,} item-hour rows",
+            "label": "No missing 30-day hourly candle gaps",
+            "ok": missing_1h == 0,
+            "detail": "0 gaps" if missing_1h == 0 else f"{missing_1h} missing",
         },
     ]
-    ml_score = int(
+    pipeline_score = int(
         round(
             min(100.0, cov_30d) * 0.45
             + min(1.0, c24_buckets / 28.0) * 20.0
-            + min(1.0, seas_items / 1500.0) * 15.0
-            + min(1.0, c1_rows / 1_500_000.0) * 20.0
+            + min(1.0, seas_items / 1500.0) * 20.0
+            + (15.0 if missing_1h == 0 else max(0.0, 15.0 - missing_1h * 0.5))
         )
     )
-    ml_ready = all(c["ok"] for c in ml_checks)
+    pipeline_healthy = all(c["ok"] for c in pipeline_checks)
 
     overall_status, issues = compute_quick_health(state, wiki, db_path)
     used_ram, total_ram = _read_system_ram_mb()
@@ -241,15 +268,15 @@ async def get_system_health(
             "candles_24h": db_stats["candles_24h"],
             "expected_1h_30d": db_stats["expected_1h_30d"],
             "present_1h_30d": db_stats["present_1h_30d"],
-            "missing_1h_30d": db_stats["missing_1h_30d"],
+            "missing_1h_30d": missing_1h,
             "coverage_30d_pct": cov_30d,
             "seasonality_30d_items": seas_items,
             "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
             "wal_size_mb": round(wal_size_bytes / (1024 * 1024), 2),
-            "ml_readiness": {
-                "score": ml_score,
-                "ready": ml_ready,
-                "checks": ml_checks,
+            "pipeline_health": {
+                "score": pipeline_score,
+                "healthy": pipeline_healthy,
+                "checks": pipeline_checks,
             },
         },
         "engine": {
@@ -276,7 +303,8 @@ async def get_system_health(
                 "stage": state.bootstrap_progress.get("stage", "ready"),
             },
         },
-        "vps": {
+        "runtime": {
+            "platform": _detect_platform(),
             "uptime_sec": max(0, now - state.started_at),
             "process_rss_mb": _read_process_rss_mb(),
             "system_ram_used_mb": used_ram,
@@ -329,5 +357,16 @@ async def action_wal_checkpoint(request: Request) -> dict[str, Any]:
     """Safe idempotent action: flush SQLite WAL log into main DB file."""
     repo = request.app.state.repo
     result = await repo.run_wal_checkpoint()
+    invalidate_db_stats_cache()
+    return {"ok": True, **result}
+
+
+@router.post("/actions/backup")
+async def action_backup_db(request: Request) -> dict[str, Any]:
+    """Safe idempotent action: create a consistent hot SQLite backup (keeps last 14)."""
+    repo = request.app.state.repo
+    db = request.app.state.db
+    backup_dir = _resolve_backup_dir(db.db_path)
+    result = await repo.create_online_backup(backup_dir, keep_last=14)
     invalidate_db_stats_cache()
     return {"ok": True, **result}

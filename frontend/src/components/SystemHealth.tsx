@@ -7,10 +7,10 @@ import {
   Cpu,
   Database,
   HardDrive,
+  Layers,
   RefreshCw,
   Server,
   ShieldCheck,
-  Sparkles,
   Wrench,
 } from 'lucide-react';
 import { api } from '../api/client';
@@ -116,7 +116,7 @@ export function SystemHealth() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  const runAction = async (key: 'rollup' | 'gaps' | 'checkpoint') => {
+  const runAction = async (key: 'rollup' | 'gaps' | 'checkpoint' | 'backup') => {
     setRunningAction(key);
     setActionFeedback(null);
     try {
@@ -129,11 +129,17 @@ export function SystemHealth() {
       } else if (key === 'gaps') {
         const res = await api.actionFillGaps();
         setActionFeedback({ kind: 'ok', text: res.message });
-      } else {
+      } else if (key === 'checkpoint') {
         const res = await api.actionCheckpoint();
         setActionFeedback({
           kind: 'ok',
           text: `WAL checkpoint complete: ${res.checkpointed_frames}/${res.log_frames} frames flushed (busy=${res.busy}).`,
+        });
+      } else {
+        const res = await api.actionBackupDb();
+        setActionFeedback({
+          kind: 'ok',
+          text: `Hot SQLite backup saved to ${res.filename} (${res.size_mb} MB in ${res.elapsed_ms} ms · ${res.total_backups} archived).`,
         });
       }
       await load(true);
@@ -165,20 +171,21 @@ export function SystemHealth() {
 
   if (!data) return null;
 
-  const { dataset, engine, vps, integrations } = data;
+  const { dataset, engine, runtime, integrations } = data;
   const isHealthy = data.overall_status === 'healthy';
   const ramPct =
-    vps.system_ram_used_mb && vps.system_ram_total_mb
-      ? Math.min(100, Math.round((vps.system_ram_used_mb / vps.system_ram_total_mb) * 100))
+    runtime.system_ram_used_mb !== null && runtime.system_ram_total_mb
+      ? Math.min(100, Math.round((runtime.system_ram_used_mb / runtime.system_ram_total_mb) * 100))
       : null;
   const diskUsedGb =
-    vps.disk_total_gb !== null && vps.disk_free_gb !== null
-      ? Math.max(0, vps.disk_total_gb - vps.disk_free_gb)
+    runtime.disk_total_gb !== null && runtime.disk_free_gb !== null
+      ? Math.max(0, runtime.disk_total_gb - runtime.disk_free_gb)
       : null;
   const diskPct =
-    diskUsedGb !== null && vps.disk_total_gb
-      ? Math.min(100, Math.round((diskUsedGb / vps.disk_total_gb) * 100))
+    diskUsedGb !== null && runtime.disk_total_gb
+      ? Math.min(100, Math.round((diskUsedGb / runtime.disk_total_gb) * 100))
       : null;
+  const hasOsTelemetry = runtime.process_rss_mb !== null || runtime.load_avg_1m !== null;
 
   return (
     <div className="space-y-5">
@@ -209,7 +216,7 @@ export function SystemHealth() {
                 </span>
               </div>
               <p className="text-[11px] text-zinc-500">
-                Auto-refreshes every 15s · SQLite counts cached 30s server-side · Uptime {formatUptime(vps.uptime_sec)}
+                Auto-refreshes every 15s · SQLite counts cached 30s server-side · Uptime {formatUptime(runtime.uptime_sec)}
               </p>
             </div>
           </div>
@@ -260,17 +267,17 @@ export function SystemHealth() {
             </div>
           </div>
           <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Phase 5 ML</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Data Pipeline</div>
             <div className="mt-1 flex items-baseline gap-1.5">
               <span
                 className={`text-lg font-bold tabular-nums ${
-                  dataset.ml_readiness.ready ? 'text-emerald-400' : 'text-amber-300'
+                  dataset.pipeline_health.healthy ? 'text-emerald-400' : 'text-amber-300'
                 }`}
               >
-                {dataset.ml_readiness.score}%
+                {dataset.pipeline_health.score}%
               </span>
               <span className="text-[11px] text-zinc-500">
-                {dataset.ml_readiness.ready ? 'Ready' : 'Collecting'}
+                {dataset.pipeline_health.healthy ? 'Healthy' : 'Collecting'}
               </span>
             </div>
           </div>
@@ -279,11 +286,11 @@ export function SystemHealth() {
 
       {/* 2x2 Observability Grid */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Card 1: Dataset & Phase 5 ML Readiness */}
+        {/* Card 1: Dataset & History Coverage */}
         <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c0f] p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
-              <Database className="h-4 w-4 text-sky-400" /> Dataset & Phase 5 ML Readiness
+              <Database className="h-4 w-4 text-sky-400" /> Dataset & History Coverage
             </h3>
             <span className="text-[11px] tabular-nums text-zinc-500">
               {dataset.missing_1h_30d === 0
@@ -325,24 +332,24 @@ export function SystemHealth() {
             </table>
           </div>
 
-          {/* Phase 5 ML Readiness Progress & Checklist */}
+          {/* Data Pipeline Health Checklist */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5 font-semibold text-zinc-200">
-                <Sparkles className="h-3.5 w-3.5 text-amber-400" /> Phase 5 LightGBM Readiness
+                <Layers className="h-3.5 w-3.5 text-sky-400" /> Data Pipeline Health
               </span>
-              <span className="tabular-nums font-semibold text-zinc-300">{dataset.ml_readiness.score}%</span>
+              <span className="tabular-nums font-semibold text-zinc-300">{dataset.pipeline_health.score}%</span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-900">
               <div
                 className={`h-full rounded-full transition-all ${
-                  dataset.ml_readiness.ready ? 'bg-emerald-500' : 'bg-amber-400'
+                  dataset.pipeline_health.healthy ? 'bg-emerald-500' : 'bg-amber-400'
                 }`}
-                style={{ width: `${Math.min(100, dataset.ml_readiness.score)}%` }}
+                style={{ width: `${Math.min(100, dataset.pipeline_health.score)}%` }}
               />
             </div>
             <div className="space-y-1.5 pt-1">
-              {dataset.ml_readiness.checks.map((chk) => (
+              {dataset.pipeline_health.checks.map((chk) => (
                 <div key={chk.label} className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="flex items-center gap-1.5 text-zinc-300">
                     <CheckCircle2
@@ -432,49 +439,53 @@ export function SystemHealth() {
           )}
         </div>
 
-        {/* Card 3: VPS & Backup Health */}
+        {/* Card 3: Runtime & Storage (cross-platform: local or server) */}
         <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c0f] p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
-              <Server className="h-4 w-4 text-violet-400" /> VPS & Backup Health
+              <Server className="h-4 w-4 text-violet-400" /> Runtime & Storage
             </h3>
-            <span className="text-[11px] tabular-nums text-zinc-500">
-              {vps.cpu_count} vCPU{vps.cpu_count > 1 ? 's' : ''}
+            <span className="rounded-full border border-white/[0.08] bg-zinc-900 px-2.5 py-0.5 text-[10px] font-medium text-zinc-300">
+              {runtime.platform} · {runtime.cpu_count} CPU{runtime.cpu_count > 1 ? 's' : ''}
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5 text-xs">
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
-              <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                <Cpu className="h-3 w-3" /> Process RAM
-              </div>
-              <div className="mt-1 font-semibold tabular-nums text-zinc-200">
-                {vps.process_rss_mb !== null ? `${vps.process_rss_mb} MB` : 'N/A (dev)'}
-              </div>
+          {hasOsTelemetry && (
+            <div className="grid grid-cols-2 gap-2.5 text-xs">
+              {runtime.process_rss_mb !== null && (
+                <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
+                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                    <Cpu className="h-3 w-3" /> Process Memory
+                  </div>
+                  <div className="mt-1 font-semibold tabular-nums text-zinc-200">{runtime.process_rss_mb} MB</div>
+                </div>
+              )}
+              {runtime.load_avg_1m !== null && (
+                <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">CPU Load (1m)</div>
+                  <div className="mt-1 font-semibold tabular-nums text-zinc-200">
+                    {runtime.load_avg_1m.toFixed(2)} / {runtime.cpu_count}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500">CPU Load (1m)</div>
-              <div className="mt-1 font-semibold tabular-nums text-zinc-200">
-                {vps.load_avg_1m !== null ? `${vps.load_avg_1m.toFixed(2)} / ${vps.cpu_count}` : 'N/A (dev)'}
-              </div>
-            </div>
-          </div>
+          )}
 
-          {/* System RAM & Disk bars */}
+          {/* System RAM (shown when host OS exposes /proc/meminfo) & Disk Storage */}
           <div className="space-y-3 text-xs">
-            <div>
-              <div className="mb-1 flex items-center justify-between text-[11px]">
-                <span className="text-zinc-400">Host Memory</span>
-                <span className="tabular-nums text-zinc-300">
-                  {vps.system_ram_used_mb !== null && vps.system_ram_total_mb !== null
-                    ? `${Math.round(vps.system_ram_used_mb)} / ${Math.round(vps.system_ram_total_mb)} MB (${ramPct}%)`
-                    : 'Linux /proc only'}
-                </span>
+            {ramPct !== null && runtime.system_ram_used_mb !== null && runtime.system_ram_total_mb !== null && (
+              <div>
+                <div className="mb-1 flex items-center justify-between text-[11px]">
+                  <span className="text-zinc-400">Host Memory</span>
+                  <span className="tabular-nums text-zinc-300">
+                    {Math.round(runtime.system_ram_used_mb)} / {Math.round(runtime.system_ram_total_mb)} MB ({ramPct}%)
+                  </span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900">
+                  <div className="h-full rounded-full bg-violet-400" style={{ width: `${ramPct}%` }} />
+                </div>
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900">
-                <div className="h-full rounded-full bg-violet-400" style={{ width: `${ramPct ?? 0}%` }} />
-              </div>
-            </div>
+            )}
 
             <div>
               <div className="mb-1 flex items-center justify-between text-[11px]">
@@ -482,8 +493,8 @@ export function SystemHealth() {
                   <HardDrive className="h-3 w-3" /> Disk Storage
                 </span>
                 <span className="tabular-nums text-zinc-300">
-                  {vps.disk_free_gb !== null && vps.disk_total_gb !== null
-                    ? `${vps.disk_free_gb} GB free of ${vps.disk_total_gb} GB`
+                  {runtime.disk_free_gb !== null && runtime.disk_total_gb !== null
+                    ? `${runtime.disk_free_gb} GB free of ${runtime.disk_total_gb} GB`
                     : 'Unavailable'}
                 </span>
               </div>
@@ -498,32 +509,32 @@ export function SystemHealth() {
             </div>
           </div>
 
-          {/* Daily SQLite Backup Status */}
+          {/* SQLite Backup Archive Status */}
           <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                Daily SQLite Backup
+                SQLite Backups
               </span>
-              {vps.backup.found ? (
+              {runtime.backup.found ? (
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                  {vps.backup.count} archived
+                  {runtime.backup.count} archived
                 </span>
               ) : (
                 <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
-                  No local archive yet
+                  No backups yet
                 </span>
               )}
             </div>
-            {vps.backup.found ? (
+            {runtime.backup.found ? (
               <div className="mt-1.5 flex items-center justify-between text-[11px] text-zinc-300">
-                <span className="truncate font-mono text-zinc-400">{vps.backup.filename}</span>
+                <span className="truncate font-mono text-zinc-400">{runtime.backup.filename}</span>
                 <span className="shrink-0 tabular-nums text-zinc-300">
-                  {vps.backup.size_mb} MB · {vps.backup.age_hours}h ago
+                  {runtime.backup.size_mb} MB · {runtime.backup.age_hours}h ago
                 </span>
               </div>
             ) : (
               <p className="mt-1 text-[11px] text-zinc-500">
-                Runs daily via systemd backup timer into <code>backups/</code>.
+                Click <strong>Backup DB Now</strong> below to save a consistent hot snapshot into <code>backups/</code>.
               </p>
             )}
           </div>
@@ -658,6 +669,13 @@ export function SystemHealth() {
             className="rounded-xl border border-white/[0.1] bg-zinc-900 px-3.5 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-50"
           >
             {runningAction === 'checkpoint' ? 'Checkpointing...' : 'SQLite WAL Checkpoint'}
+          </button>
+          <button
+            onClick={() => runAction('backup')}
+            disabled={runningAction !== null}
+            className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-2 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:opacity-50"
+          >
+            {runningAction === 'backup' ? 'Creating Backup...' : 'Backup DB Now'}
           </button>
         </div>
 
