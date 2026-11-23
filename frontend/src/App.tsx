@@ -27,7 +27,7 @@ import { CommandCenter } from './pages/CommandCenter';
 import { Journal } from './pages/Journal';
 import { Overnight } from './pages/Overnight';
 import { Scanner } from './pages/Scanner';
-import { Settings } from './pages/Settings';
+import { Settings, type SettingsSubTab } from './pages/Settings';
 import { Watchlist } from './pages/Watchlist';
 import type {
   ActiveSlot,
@@ -60,6 +60,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
 
   const [activeTab, setActiveTab] = useState<NavTab>('command');
+  const [settingsSubTab, setSettingsSubTab] = useState<SettingsSubTab>('general');
   const [status, setStatus] = useState<MarketStatus | null>(null);
 
   // User trading state
@@ -409,22 +410,34 @@ export default function App() {
 
         {/* Bottom Utility Icons */}
         <div className="flex flex-col items-center gap-2 px-2 w-full">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg"
+          <button
+            onClick={() => {
+              setActiveTab('settings');
+              setSettingsSubTab('health');
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/[0.06] transition"
             title={
-              status?.ready
-                ? `Live · ${status.items_tracked.toLocaleString()} items · ${status.last_recompute_ms}ms`
-                : 'Bootstrapping...'
+              !connected
+                ? 'Offline — click for System & Data Health'
+                : status?.health_status === 'degraded'
+                  ? `Degraded: ${status.health_issues?.join(' · ') || 'Check System Health'}`
+                  : status?.ready
+                    ? `Live · ${status.items_tracked.toLocaleString()} items · ${status.last_recompute_ms}ms (click for Data Health)`
+                    : 'Bootstrapping...'
             }
           >
             <span
               className={`h-2 w-2 rounded-full ${
-                connected && status?.ready
-                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]'
-                  : 'bg-amber-400 animate-pulse'
+                !connected
+                  ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]'
+                  : status?.health_status === 'degraded'
+                    ? 'bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.8)]'
+                    : status?.ready
+                      ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]'
+                      : 'bg-amber-400 animate-pulse'
               }`}
             />
-          </div>
+          </button>
           {authRequired && (
             <button
               onClick={async () => {
@@ -461,8 +474,51 @@ export default function App() {
               </kbd>
             </button>
 
-            {/* Right: Persistent Cash Stack, Members Toggle, Alerts */}
+            {/* Right: Smart Health Pill, Cash Stack, Members Toggle, Alerts */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* Clickable Smart Health Status Pill -> Settings > System & Data Health */}
+              <button
+                onClick={() => {
+                  setActiveTab('settings');
+                  setSettingsSubTab('health');
+                }}
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                  !connected
+                    ? 'border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/15'
+                    : status?.health_status === 'degraded'
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15'
+                      : 'border-white/[0.08] bg-[#0c0c10] text-zinc-300 hover:border-white/[0.18]'
+                }`}
+                title={
+                  !connected
+                    ? 'WebSocket disconnected — click to inspect System & Data Health'
+                    : status?.health_status === 'degraded'
+                      ? `Degraded: ${status.health_issues?.join(' · ') || 'Check System Health'}`
+                      : 'System & Data Health (click to open)'
+                }
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    !connected
+                      ? 'bg-rose-400'
+                      : status?.health_status === 'degraded'
+                        ? 'bg-amber-400 animate-pulse'
+                        : status?.ready
+                          ? 'bg-emerald-400'
+                          : 'bg-amber-400 animate-pulse'
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {!connected
+                    ? 'Offline'
+                    : status?.health_status === 'degraded'
+                      ? 'Degraded'
+                      : status?.ready
+                        ? `Live · ${Math.round(status.last_recompute_ms)}ms`
+                        : 'Syncing'}
+                </span>
+              </button>
+
               {/* Cash Stack Popover */}
               <div className="relative" ref={cashMenuRef}>
                 <button
@@ -630,7 +686,13 @@ export default function App() {
             <Journal slotsVersion={slotsVersion} onOpenChart={setSelectedItemId} />
           )}
 
-          {activeTab === 'settings' && <Settings onSettingsSaved={handleSettingsSaved} />}
+          {activeTab === 'settings' && (
+            <Settings
+              activeSubTab={settingsSubTab}
+              onChangeSubTab={setSettingsSubTab}
+              onSettingsSaved={handleSettingsSaved}
+            />
+          )}
         </main>
       </div>
 

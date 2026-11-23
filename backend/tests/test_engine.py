@@ -346,3 +346,63 @@ async def test_dink_webhook_lifecycle(tmp_path: Path, monkeypatch: pytest.Monkey
     await alerts.close()
     await db.close()
     get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "sys.db"))
+    monkeypatch.setenv("APP_PASSWORD", "")
+
+    from app.alerts.dispatcher import AlertDispatcher
+    from app.config import get_settings
+    from app.db.database import Database
+    from app.db.repository import Repository
+    from app.ingestion.collector import CollectorService
+    from app.ingestion.wiki_client import WikiApiClient
+    from app.main import WebSocketHub
+    from app.routers import system as system_router
+    from fastapi import FastAPI
+
+    get_settings.cache_clear()
+    cfg = get_settings()
+    db = Database(cfg.db_file)
+    await db.connect()
+    repo = Repository(db)
+    wiki = WikiApiClient(cfg)
+    state = _build_sample_state()
+    ws_hub = WebSocketHub()
+    alerts = AlertDispatcher(cfg, repo, ws_hub.broadcast)
+    collector = CollectorService(cfg, db, repo, wiki, state, alerts, ws_hub.broadcast)
+
+    system_router.invalidate_db_stats_cache()
+    app = FastAPI()
+    app.state.settings = cfg
+    app.state.db = db
+    app.state.repo = repo
+    app.state.wiki_client = wiki
+    app.state.market_state = state
+    app.state.ws_hub = ws_hub
+    app.state.alerts = alerts
+    app.state.collector = collector
+    app.include_router(system_router.router)
+
+    client = TestClient(app)
+    res = client.get("/api/system/health?fresh=true")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["overall_status"] in ("healthy", "degraded")
+    assert body["engine"]["items_tracked"] == len(state.metrics)
+    assert len(body["engine"]["recompute_history"]) >= 1
+    assert "ml_readiness" in body["dataset"]
+
+    chk = client.post("/api/system/actions/checkpoint")
+    assert chk.status_code == 200
+    assert chk.json()["ok"] is True
+
+    rol = client.post("/api/system/actions/rollup")
+    assert rol.status_code == 200
+    assert rol.json()["ok"] is True
+
+    await alerts.close()
+    await db.close()
+    get_settings.cache_clear()

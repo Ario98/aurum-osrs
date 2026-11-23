@@ -39,6 +39,11 @@ class AlertDispatcher:
         # (alert_type, key) -> last_sent_epoch
         self._cooldowns: dict[tuple[str, str], float] = {}
         self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+        self.last_discord_sent_ts: Optional[int] = None
+        self.last_discord_ok: Optional[bool] = None
+        self.last_discord_error: Optional[str] = None
+        self.discord_sent_count: int = 0
+        self.discord_fail_count: int = 0
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -82,10 +87,22 @@ class AlertDispatcher:
         try:
             resp = await self._http.post(url, json={"embeds": [embed]})
             if resp.status_code in (200, 204):
+                self.last_discord_sent_ts = int(time.time())
+                self.last_discord_ok = True
+                self.last_discord_error = None
+                self.discord_sent_count += 1
                 return True
+            self.last_discord_sent_ts = int(time.time())
+            self.last_discord_ok = False
+            self.last_discord_error = f"HTTP {resp.status_code}"
+            self.discord_fail_count += 1
             logger.warning("Discord webhook returned %s: %s", resp.status_code, resp.text[:200])
             return False
         except httpx.HTTPError as exc:
+            self.last_discord_sent_ts = int(time.time())
+            self.last_discord_ok = False
+            self.last_discord_error = str(exc)[:120]
+            self.discord_fail_count += 1
             logger.warning("Discord webhook failed: %s", exc)
             return False
 

@@ -10,6 +10,7 @@ import type {
   OvernightStyle,
   ScannerPreset,
   StrategyMode,
+  SystemHealthResponse,
   TradeCallsResponse,
   UserSettings,
   WatchlistItem,
@@ -187,4 +188,23 @@ export const api = {
     }),
   deleteWatchlist: (itemId: number) =>
     request<{ deleted: boolean }>(`/api/watchlist/${itemId}`, { method: 'DELETE' }),
+
+  // System & Data Health
+  systemHealth: (fresh = false) =>
+    request<SystemHealthResponse>(`/api/system/health${fresh ? '?fresh=true' : ''}`),
+  actionRollup: () =>
+    request<{ ok: boolean; rolled_24h_rows: number; seasonality_items: number; recompute_ms: number; elapsed_ms: number }>(
+      '/api/system/actions/rollup',
+      { method: 'POST' },
+    ),
+  actionFillGaps: () =>
+    request<{ ok: boolean; status: string; message: string; filled_5m: number; filled_1h: number; remaining_1h: number }>(
+      '/api/system/actions/fill-gaps',
+      { method: 'POST' },
+    ),
+  actionCheckpoint: () =>
+    request<{ ok: boolean; busy: number; log_frames: number; checkpointed_frames: number }>(
+      '/api/system/actions/checkpoint',
+      { method: 'POST' },
+    ),
 };

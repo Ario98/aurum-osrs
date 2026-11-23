@@ -681,3 +681,89 @@ class Repository:
             cur = await self.db.conn.execute("DELETE FROM watchlist WHERE item_id = ?", (item_id,))
             await self.db.conn.commit()
             return (cur.rowcount or 0) > 0
+
+    # ------------------------------------------------------------------
+    # System & Data Health Diagnostics + Maintenance
+    # ------------------------------------------------------------------
+
+    async def get_system_db_stats(self, lookback_days: int = 30) -> dict[str, Any]:
+        """Collect dataset coverage, row/bucket counts, alert counts & meta timestamps."""
+        now = int(time.time())
+        day_ago = now - 86400
+
+        async def _table_stats(table: str) -> dict[str, Any]:
+            async with self.db.conn.execute(
+                f"SELECT COUNT(DISTINCT ts) AS buckets, COUNT(*) AS rows, MIN(ts) AS oldest_ts, MAX(ts) AS newest_ts FROM {table}"
+            ) as cur:
+                r = await cur.fetchone()
+            return {
+                "buckets": int(r["buckets"] or 0) if r else 0,
+                "rows": int(r["rows"] or 0) if r else 0,
+                "oldest_ts": int(r["oldest_ts"]) if (r and r["oldest_ts"] is not None) else None,
+                "newest_ts": int(r["newest_ts"]) if (r and r["newest_ts"] is not None) else None,
+            }
+
+        c5 = await _table_stats("candles_5m")
+        c1 = await _table_stats("candles_1h")
+        c24 = await _table_stats("candles_24h")
+
+        # Exact 30-day hourly gap calculation
+        latest_closed_1h = (now // 3600) * 3600 - 3600
+        expected_1h_30d = lookback_days * 24
+        cutoff_30d = latest_closed_1h - (expected_1h_30d - 1) * 3600
+        existing_1h_30d = await self.get_existing_bucket_timestamps("candles_1h", cutoff_30d)
+        present_1h_30d = sum(1 for i in range(expected_1h_30d) if (latest_closed_1h - i * 3600) in existing_1h_30d)
+        missing_1h_30d = max(0, expected_1h_30d - present_1h_30d)
+        coverage_30d_pct = round((present_1h_30d / expected_1h_30d) * 100.0, 1) if expected_1h_30d > 0 else 0.0
+
+        # 24h alert breakdown
+        async with self.db.conn.execute(
+            "SELECT alert_type, COUNT(*) AS cnt FROM alert_log WHERE created_at >= ? GROUP BY alert_type",
+            (day_ago,),
+        ) as cur:
+            alert_rows = await cur.fetchall()
+        alerts_by_type = {str(r["alert_type"]): int(r["cnt"]) for r in alert_rows}
+        alerts_24h_total = sum(alerts_by_type.values())
+
+        async with self.db.conn.execute("SELECT COUNT(*) FROM watchlist") as cur:
+            watchlist_count = int((await cur.fetchone())[0])
+        async with self.db.conn.execute("SELECT COUNT(*) FROM active_slots") as cur:
+            active_slots_count = int((await cur.fetchone())[0])
+        async with self.db.conn.execute("SELECT COUNT(*) FROM flip_history") as cur:
+            journal_flips_count = int((await cur.fetchone())[0])
+
+        last_dink_raw = await self.get_meta("last_dink_webhook_ts")
+        dink_count_raw = await self.get_meta("dink_events_total")
+        last_mapping_raw = await self.get_meta("last_mapping_fetch")
+
+        return {
+            "candles_5m": c5,
+            "candles_1h": c1,
+            "candles_24h": c24,
+            "expected_1h_30d": expected_1h_30d,
+            "present_1h_30d": present_1h_30d,
+            "missing_1h_30d": missing_1h_30d,
+            "coverage_30d_pct": coverage_30d_pct,
+            "alerts_24h_total": alerts_24h_total,
+            "alerts_24h_by_type": alerts_by_type,
+            "watchlist_count": watchlist_count,
+            "active_slots_count": active_slots_count,
+            "journal_flips_count": journal_flips_count,
+            "last_dink_ts": int(last_dink_raw) if last_dink_raw and last_dink_raw.isdigit() else None,
+            "dink_events_total": int(dink_count_raw) if dink_count_raw and dink_count_raw.isdigit() else 0,
+            "last_mapping_fetch": int(last_mapping_raw) if last_mapping_raw and last_mapping_raw.isdigit() else None,
+        }
+
+    async def run_wal_checkpoint(self) -> dict[str, Any]:
+        """Flush SQLite WAL journal cleanly back into the main DB file."""
+        async with self.db.write_lock:
+            async with self.db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)") as cur:
+                row = await cur.fetchone()
+            await self.db.conn.commit()
+        if not row:
+            return {"busy": 0, "log_frames": 0, "checkpointed_frames": 0}
+        return {
+            "busy": int(row[0]),
+            "log_frames": int(row[1]),
+            "checkpointed_frames": int(row[2]),
+        }

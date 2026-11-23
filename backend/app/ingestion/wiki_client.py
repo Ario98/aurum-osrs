@@ -25,6 +25,9 @@ class WikiApiClient:
         self._min_interval_sec: float = settings.wiki_min_request_interval_ms / 1000.0
         self._consecutive_errors: int = 0
         self._total_requests: int = 0
+        self._total_errors: int = 0
+        self._last_error: Optional[str] = None
+        self._last_error_ts: Optional[int] = None
 
     async def start(self) -> None:
         self._client = httpx.AsyncClient(
@@ -47,6 +50,22 @@ class WikiApiClient:
     def total_requests(self) -> int:
         return self._total_requests
 
+    @property
+    def total_errors(self) -> int:
+        return self._total_errors
+
+    @property
+    def consecutive_errors(self) -> int:
+        return self._consecutive_errors
+
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
+
+    @property
+    def last_error_ts(self) -> Optional[int]:
+        return self._last_error_ts
+
     async def _get_json(self, path: str, params: Optional[dict[str, Any]] = None) -> Any:
         if self._client is None:
             raise RuntimeError("WikiApiClient not started")
@@ -65,6 +84,9 @@ class WikiApiClient:
                 resp = await self._client.get(path, params=params)
                 if resp.status_code == 429 or resp.status_code >= 500:
                     self._consecutive_errors += 1
+                    self._total_errors += 1
+                    self._last_error = f"HTTP {resp.status_code} on {path}"
+                    self._last_error_ts = int(time.time())
                     backoff = min(10.0, (2 ** attempt) * 0.75)
                     logger.warning(
                         "Wiki API %s returned %s (attempt %d/%d). Backing off %.1fs",
@@ -83,6 +105,9 @@ class WikiApiClient:
 
             except httpx.HTTPError as exc:
                 self._consecutive_errors += 1
+                self._total_errors += 1
+                self._last_error = f"{type(exc).__name__} on {path}: {exc}"
+                self._last_error_ts = int(time.time())
                 if attempt == max_attempts:
                     logger.error("Wiki API %s failed after %d attempts: %s", path, max_attempts, exc)
                     raise

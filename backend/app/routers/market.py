@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import require_auth
 from app.engine.strategies import generate_overnight_flips, generate_trade_calls
+from app.routers.system import compute_quick_health
 
 router = APIRouter(prefix="/api/market", tags=["market"], dependencies=[Depends(require_auth)])
 
@@ -17,6 +18,8 @@ router = APIRouter(prefix="/api/market", tags=["market"], dependencies=[Depends(
 async def market_status(request: Request) -> dict[str, Any]:
     state = request.app.state.market_state
     wiki = request.app.state.wiki_client
+    db = request.app.state.db
+    health_status, health_issues = compute_quick_health(state, wiki, db.db_path)
     return {
         "ready": state.bootstrap_fast_done,
         "enrichment_done": state.bootstrap_bg_done,
@@ -26,6 +29,8 @@ async def market_status(request: Request) -> dict[str, Any]:
         "last_recompute_ms": round(state.last_recompute_ms, 2),
         "nature_rune_price": state.nature_rune_price,
         "total_wiki_requests": wiki.total_requests,
+        "health_status": health_status,
+        "health_issues": health_issues,
     }
 
 

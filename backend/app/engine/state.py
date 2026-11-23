@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -261,6 +261,9 @@ class MarketState:
         self.nature_rune_price: int = DEFAULT_NATURE_RUNE_PRICE
         self.last_latest_update: int = 0
         self.last_recompute_ms: float = 0.0
+        self.last_candle_agg_ms: float = 0.0
+        self.started_at: int = int(time.time())
+        self.recompute_history: deque[dict[str, Any]] = deque(maxlen=60)
         self.bootstrap_fast_done: bool = False
         self.bootstrap_bg_done: bool = False
         self.bootstrap_progress: dict[str, Any] = {
@@ -456,6 +459,7 @@ class MarketState:
         self._candle_stats = new_cache
         self._candles_dirty = False
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        self.last_candle_agg_ms = elapsed_ms
         logger.debug("Recomputed candle aggregates for %d items in %.1f ms", len(new_cache), elapsed_ms)
         return elapsed_ms
 
@@ -817,4 +821,5 @@ class MarketState:
         self.metrics = new_metrics
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         self.last_recompute_ms = elapsed_ms
+        self.recompute_history.append({"ts": now, "ms": round(elapsed_ms, 2)})
         return elapsed_ms

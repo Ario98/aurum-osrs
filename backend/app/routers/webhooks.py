@@ -65,6 +65,15 @@ async def receive_dink_webhook(
     alerts = request.app.state.alerts
     ws_hub = request.app.state.ws_hub
 
+    # Record Dink telemetry in meta_state (survives restarts)
+    try:
+        prev_cnt = await repo.get_meta("dink_events_total")
+        new_cnt = (int(prev_cnt) if prev_cnt and prev_cnt.isdigit() else 0) + 1
+        await repo.set_meta("dink_events_total", str(new_cnt))
+        await repo.set_meta("last_dink_webhook_ts", str(int(time.time())))
+    except Exception:
+        pass
+
     meta = state.items.get(item_id, {})
     m = state.metrics.get(item_id)
     if not item_name:

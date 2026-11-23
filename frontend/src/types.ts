@@ -18,6 +18,8 @@ export interface MarketStatus {
   last_recompute_ms: number;
   nature_rune_price: number;
   total_wiki_requests: number;
+  health_status?: 'healthy' | 'degraded';
+  health_issues?: string[];
 }
 
 export interface TradeCall {
@@ -398,4 +400,97 @@ export interface WatchlistItem {
   safety_score: number;
   is_tax_exempt: boolean;
   triggered: string[];
+}
+
+export interface CandleTableStats {
+  buckets: number;
+  rows: number;
+  oldest_ts: number | null;
+  newest_ts: number | null;
+}
+
+export interface SystemHealthResponse {
+  overall_status: 'healthy' | 'degraded' | 'offline';
+  issues: string[];
+  generated_at: number;
+  db_stats_cached: boolean;
+  dataset: {
+    candles_5m: CandleTableStats;
+    candles_1h: CandleTableStats;
+    candles_24h: CandleTableStats;
+    expected_1h_30d: number;
+    present_1h_30d: number;
+    missing_1h_30d: number;
+    coverage_30d_pct: number;
+    seasonality_30d_items: number;
+    db_size_mb: number;
+    wal_size_mb: number;
+    ml_readiness: {
+      score: number;
+      ready: boolean;
+      checks: Array<{
+        label: string;
+        ok: boolean;
+        detail: string;
+      }>;
+    };
+  };
+  engine: {
+    ready: boolean;
+    enrichment_done: boolean;
+    items_tracked: number;
+    last_latest_update: number;
+    last_latest_age_sec: number | null;
+    last_5m_ts: number | null;
+    last_1h_ts: number | null;
+    last_recompute_ms: number;
+    last_candle_agg_ms: number;
+    recompute_history: Array<{ ts: number; ms: number }>;
+    wiki_total_requests: number;
+    wiki_total_errors: number;
+    wiki_consecutive_errors: number;
+    wiki_last_error: string | null;
+    wiki_last_error_ts: number | null;
+    ws_clients: number;
+    backfill: {
+      active: boolean;
+      fetched: number;
+      total: number;
+      stage: string;
+    };
+  };
+  vps: {
+    uptime_sec: number;
+    process_rss_mb: number | null;
+    system_ram_used_mb: number | null;
+    system_ram_total_mb: number | null;
+    load_avg_1m: number | null;
+    cpu_count: number;
+    disk_free_gb: number | null;
+    disk_total_gb: number | null;
+    backup: {
+      found: boolean;
+      filename: string | null;
+      timestamp: number | null;
+      age_hours: number | null;
+      size_mb: number | null;
+      count: number;
+    };
+  };
+  integrations: {
+    dink_configured: boolean;
+    last_dink_ts: number | null;
+    dink_events_total: number;
+    discord_configured: boolean;
+    last_discord_sent_ts: number | null;
+    last_discord_ok: boolean | null;
+    last_discord_error: string | null;
+    discord_sent_count: number;
+    discord_fail_count: number;
+    alerts_24h_total: number;
+    alerts_24h_by_type: Record<string, number>;
+    watchlist_count: number;
+    active_slots_count: number;
+    journal_flips_count: number;
+  };
 }

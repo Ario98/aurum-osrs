@@ -46,6 +46,10 @@ class CollectorService:
         self._tasks: list[asyncio.Task[Any]] = []
         self._last_5m_ts: int = 0
         self._last_1h_ts: int = 0
+        self.bg_active: bool = False
+        self.bg_total_missing: int = 0
+        self.bg_fetched: int = 0
+        self._gap_fill_task: Optional[asyncio.Task[Any]] = None
 
     async def start(self) -> None:
         """Start fast bootstrap & async polling loops without blocking uvicorn boot."""
@@ -192,6 +196,9 @@ class CollectorService:
         missing = [ts for ts in target_buckets if ts not in existing]
 
         if missing:
+            self.bg_active = True
+            self.bg_total_missing = len(missing)
+            self.bg_fetched = 0
             logger.info(
                 "Background enrichment: fetching %d missing 1h buckets (%dd history, non-blocking)...",
                 len(missing),
@@ -201,6 +208,7 @@ class CollectorService:
             cutoff_ram = now - 8 * 86400
             for ts in missing:
                 if self._stop_event.is_set():
+                    self.bg_active = False
                     return
                 try:
                     actual_ts, data = await self.wiki.fetch_1h(ts)
@@ -209,13 +217,18 @@ class CollectorService:
                         if actual_ts >= cutoff_ram:
                             self.state.ingest_candle_bucket("1h", actual_ts, data)
                         fetched += 1
+                        self.bg_fetched = fetched
                         self.state.bootstrap_progress["buckets_1h_loaded"] += 1
                         if fetched % 48 == 0:
                             self.state.recompute_all_metrics()
                 except Exception as exc:
                     logger.warning("Background 1h bucket %d failed: %s", ts, exc)
+            self.bg_active = False
             logger.info("Background 30d 1h backfill fetched +%d buckets", fetched)
         else:
+            self.bg_active = False
+            self.bg_total_missing = 0
+            self.bg_fetched = 0
             logger.info("Background %dd 1h history already complete", self.settings.bootstrap_1h_background_days)
 
         # Roll up completed UTC days into permanent candles_24h & compute 30d seasonality
@@ -326,3 +339,118 @@ class CollectorService:
                         self.state.load_items(await self.repo.get_all_items())
             except Exception as exc:
                 logger.warning("Maintenance cycle failed: %s", exc)
+
+    async def run_rollup_and_seasonality(self) -> dict[str, Any]:
+        """On-demand safe action: refresh daily candles_24h rollup + 30d hour seasonality."""
+        t0 = time.perf_counter()
+        rolled = await self.repo.rollup_candles_24h()
+        seasonality = await self.repo.compute_30d_hour_seasonality()
+        self.state.set_seasonality_30d(seasonality)
+        recompute_ms = self.state.recompute_all_metrics()
+        return {
+            "rolled_24h_rows": rolled,
+            "seasonality_items": len(seasonality),
+            "recompute_ms": round(recompute_ms, 2),
+            "elapsed_ms": round((time.perf_counter() - t0) * 1000.0, 1),
+        }
+
+    async def fill_missing_candle_gaps(self) -> dict[str, Any]:
+        """On-demand safe action: detect & fill missing 5m (last 2h) and 1h (last 30d) candle gaps."""
+        if self.bg_active or (self._gap_fill_task is not None and not self._gap_fill_task.done()):
+            return {
+                "status": "already_running",
+                "message": "A candle backfill job is already running in the background.",
+                "filled_5m": 0,
+                "filled_1h": 0,
+                "remaining_1h": max(0, self.bg_total_missing - self.bg_fetched),
+            }
+
+        now = int(time.time())
+        latest_closed_5m = _floor_bucket(now - 20, 300) - 300
+        target_5m = [latest_closed_5m - i * 300 for i in range(self.settings.bootstrap_5m_fast_hours * 12)]
+        existing_5m = await self.repo.get_existing_bucket_timestamps("candles_5m", min(target_5m))
+        missing_5m = [ts for ts in target_5m if ts not in existing_5m]
+
+        latest_closed_1h = _floor_bucket(now - 40, 3600) - 3600
+        total_hours = self.settings.bootstrap_1h_background_days * 24
+        target_1h = [latest_closed_1h - i * 3600 for i in range(total_hours)]
+        existing_1h = await self.repo.get_existing_bucket_timestamps("candles_1h", min(target_1h))
+        missing_1h = [ts for ts in target_1h if ts not in existing_1h]
+
+        if not missing_5m and not missing_1h:
+            return {
+                "status": "clean",
+                "message": "No missing 5m or 30d 1h candle gaps found.",
+                "filled_5m": 0,
+                "filled_1h": 0,
+                "remaining_1h": 0,
+            }
+
+        filled_5m = 0
+        for ts in missing_5m[:24]:
+            try:
+                actual_ts, data = await self.wiki.fetch_5m(ts)
+                if actual_ts and data:
+                    await self.repo.upsert_candles("candles_5m", actual_ts, data)
+                    self.state.ingest_candle_bucket("5m", actual_ts, data)
+                    filled_5m += 1
+            except Exception as exc:
+                logger.warning("Gap fill 5m %d failed: %s", ts, exc)
+
+        # Fill up to 16 hourly gaps inline; if more remain, finish non-blocking in background
+        inline_1h = missing_1h[:16]
+        queued_1h = missing_1h[16:]
+        filled_1h = 0
+        cutoff_ram = now - 8 * 86400
+        for ts in inline_1h:
+            try:
+                actual_ts, data = await self.wiki.fetch_1h(ts)
+                if actual_ts and data:
+                    await self.repo.upsert_candles("candles_1h", actual_ts, data)
+                    if actual_ts >= cutoff_ram:
+                        self.state.ingest_candle_bucket("1h", actual_ts, data)
+                    filled_1h += 1
+            except Exception as exc:
+                logger.warning("Gap fill 1h %d failed: %s", ts, exc)
+
+        if filled_5m or filled_1h:
+            self.state.recompute_all_metrics()
+
+        if queued_1h:
+            async def _finish_rest() -> None:
+                self.bg_active = True
+                self.bg_total_missing = len(queued_1h)
+                self.bg_fetched = 0
+                try:
+                    for ts in queued_1h:
+                        if self._stop_event.is_set():
+                            return
+                        try:
+                            actual_ts, data = await self.wiki.fetch_1h(ts)
+                            if actual_ts and data:
+                                await self.repo.upsert_candles("candles_1h", actual_ts, data)
+                                if actual_ts >= cutoff_ram:
+                                    self.state.ingest_candle_bucket("1h", actual_ts, data)
+                                self.bg_fetched += 1
+                        except Exception as exc:
+                            logger.warning("Background gap fill 1h %d failed: %s", ts, exc)
+                    await self.run_rollup_and_seasonality()
+                finally:
+                    self.bg_active = False
+
+            self._gap_fill_task = asyncio.create_task(_finish_rest(), name="on-demand-gap-fill")
+            return {
+                "status": "started_background",
+                "message": f"Filled {filled_5m} 5m + {filled_1h} 1h gaps immediately; {len(queued_1h)} older 1h gaps queued in background.",
+                "filled_5m": filled_5m,
+                "filled_1h": filled_1h,
+                "remaining_1h": len(queued_1h),
+            }
+
+        return {
+            "status": "completed",
+            "message": f"Filled {filled_5m} 5m and {filled_1h} 1h missing candle gaps.",
+            "filled_5m": filled_5m,
+            "filled_1h": filled_1h,
+            "remaining_1h": 0,
+        }
