@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     # Server
-    app_name: str = "OSRS Flip Terminal v2"
+    app_name: str = "Aurum — OSRS GE Terminal"
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # OSRS Wiki Real-Time Prices API
     wiki_api_base_url: str = "https://prices.runescape.wiki/api/v1/osrs"
-    wiki_user_agent: str = "osrs-flip-terminal/2.0 - replace-with-your-contact"
+    wiki_user_agent: str = "aurum-osrs/2.0 - replace-with-your-contact"
     wiki_min_request_interval_ms: int = 350  # Polite ~2.8 req/s max during bootstrap
     wiki_timeout_seconds: float = 20.0
 

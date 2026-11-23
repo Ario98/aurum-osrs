@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "osrs-flip-terminal-backend"
+name = "aurum-osrs-backend"
 version = "2.0.0"
-description = "Blazing-fast OSRS Grand Exchange flipping & arbitrage backend"
+description = "Aurum — Real-time OSRS Grand Exchange flipping, ML & arbitrage backend"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

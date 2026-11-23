@@ -19,6 +19,14 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import { AlertDrawer, AlertToastStack } from './components/AlertToast';
+import {
+  AurumMark,
+  AurumWordmark,
+  BRAND_NAME,
+  BRAND_REPO_URL,
+  BRAND_SIGNATURE,
+  BRAND_SUBTITLE,
+} from './components/AurumLogo';
 import { CommandPalette } from './components/CommandPalette';
 import { HelpModal } from './components/HelpModal';
 import { ItemModal } from './components/ItemModal';
@@ -319,26 +327,27 @@ export default function App() {
 
   if (!authChecked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050507] text-sm text-zinc-500">
-        Connecting to OSRS Flip Terminal v2...
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-[#050507] text-sm text-zinc-500">
+        <AurumMark className="h-11 w-11 animate-pulse" />
+        <span>Connecting to {BRAND_NAME}...</span>
       </div>
     );
   }
 
   if (authRequired && !authenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#050507] p-4">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#050507] p-4">
         <form
           onSubmit={handleLogin}
           className="w-full max-w-sm rounded-2xl border border-white/[0.1] bg-[#0c0c0f] p-6 shadow-2xl space-y-4"
         >
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.1] bg-[#141419] text-amber-400">
-              <Lock className="h-5 w-5" />
-            </div>
+            <AurumMark className="h-11 w-11 shrink-0 shadow-[0_0_24px_rgba(245,158,11,0.18)] rounded-xl" />
             <div>
-              <h1 className="text-base font-bold text-zinc-100">OSRS Flip Terminal v2</h1>
-              <p className="text-xs text-zinc-500">Enter your private dashboard password</p>
+              <div className="flex items-center gap-2">
+                <AurumWordmark size="md" />
+              </div>
+              <p className="text-xs text-zinc-500">{BRAND_SUBTITLE} · Private access</p>
             </div>
           </div>
 
@@ -348,16 +357,25 @@ export default function App() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             autoFocus
-            className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3.5 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/30"
+            className="w-full rounded-xl border border-white/[0.1] bg-[#060608] px-3.5 py-2.5 text-sm text-zinc-100 outline-none focus:border-amber-400/40"
           />
           {loginError && <p className="text-xs text-rose-400">{loginError}</p>}
           <button
             type="submit"
-            className="w-full rounded-xl bg-zinc-100 py-2.5 text-sm font-bold text-zinc-950 hover:bg-white"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-300 to-amber-400 py-2.5 text-sm font-bold text-zinc-950 transition hover:from-amber-200 hover:to-amber-300"
           >
-            Unlock Terminal
+            <Lock className="h-3.5 w-3.5" />
+            Unlock {BRAND_NAME}
           </button>
         </form>
+        <a
+          href={BRAND_REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-5 text-[11px] text-zinc-600 transition hover:text-amber-300/80"
+        >
+          {BRAND_NAME} · {BRAND_SIGNATURE}
+        </a>
       </div>
     );
   }
@@ -380,10 +398,10 @@ export default function App() {
           {/* Logo Mark */}
           <button
             onClick={() => setActiveTab('command')}
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-500 text-zinc-950 shadow-[0_0_24px_rgba(245,158,11,0.22)] transition hover:scale-105"
-            title="OSRS Flip Terminal v2"
+            className="group flex h-10 w-10 items-center justify-center rounded-xl shadow-[0_0_24px_rgba(245,158,11,0.16)] transition hover:scale-105 hover:shadow-[0_0_28px_rgba(245,158,11,0.3)]"
+            title={`${BRAND_NAME} — ${BRAND_SUBTITLE}`}
           >
-            <Coins className="h-5 w-5" />
+            <AurumMark className="h-10 w-10" />
           </button>
 
           {/* Navigation Icons */}
@@ -462,21 +480,35 @@ export default function App() {
         {/* Persistent Top Command Bar */}
         <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#060609]/85 backdrop-blur-xl">
           <div className="mx-auto flex h-14 max-w-[1520px] items-center justify-between gap-3 px-4">
-            {/* Left: Ctrl+K Instant Search Trigger */}
-            <button
-              onClick={() => setPaletteOpen(true)}
-              className="flex flex-1 max-w-md items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#0c0c10] px-3.5 py-2 text-xs text-zinc-400 hover:border-white/[0.16] hover:text-zinc-200 transition"
-            >
-              <span className="flex items-center gap-2 truncate">
-                <Search className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                <span className="truncate">
-                  Search {status?.items_tracked ? status.items_tracked.toLocaleString() : '4,682'} OSRS items...
+            {/* Left: Brand Wordmark + Ctrl+K Instant Search Trigger */}
+            <div className="flex flex-1 min-w-0 items-center gap-3">
+              <button
+                onClick={() => setActiveTab('command')}
+                className="flex shrink-0 items-center gap-2 rounded-lg py-1 pr-1 text-left transition hover:opacity-90"
+                title={`${BRAND_NAME} — ${BRAND_SUBTITLE}`}
+              >
+                <AurumMark className="h-7 w-7 md:hidden" />
+                <span className="hidden sm:inline-flex items-baseline gap-2">
+                  <AurumWordmark size="sm" />
+                  <span className="hidden lg:inline h-3 w-px bg-white/[0.1]" aria-hidden="true" />
                 </span>
-              </span>
-              <kbd className="hidden sm:inline-flex items-center rounded-md border border-white/[0.1] bg-black/50 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500">
-                Ctrl K
-              </kbd>
-            </button>
+              </button>
+
+              <button
+                onClick={() => setPaletteOpen(true)}
+                className="flex flex-1 max-w-md items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#0c0c10] px-3.5 py-2 text-xs text-zinc-400 hover:border-white/[0.16] hover:text-zinc-200 transition"
+              >
+                <span className="flex items-center gap-2 truncate">
+                  <Search className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                  <span className="truncate">
+                    Search {status?.items_tracked ? status.items_tracked.toLocaleString() : '4,682'} OSRS items...
+                  </span>
+                </span>
+                <kbd className="hidden sm:inline-flex items-center rounded-md border border-white/[0.1] bg-black/50 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500">
+                  Ctrl K
+                </kbd>
+              </button>
+            </div>
 
             {/* Right: Smart Health Pill, Cash Stack, Members Toggle, Alerts */}
             <div className="flex items-center gap-2 shrink-0">
@@ -720,6 +752,26 @@ export default function App() {
             />
           )}
         </main>
+
+        {/* Quiet Brand Footer */}
+        <footer className="mx-auto w-full max-w-[1520px] px-4 pb-5 pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.05] pt-3.5 text-[11px] text-zinc-600">
+            <div className="flex items-center gap-2">
+              <AurumMark className="h-4 w-4 opacity-85" />
+              <span className="font-semibold tracking-[0.08em] uppercase text-zinc-500">{BRAND_NAME}</span>
+              <span className="text-zinc-700">·</span>
+              <span>{BRAND_SUBTITLE}</span>
+            </div>
+            <a
+              href={BRAND_REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-zinc-500 transition hover:text-amber-300"
+            >
+              {BRAND_SIGNATURE}
+            </a>
+          </div>
+        </footer>
       </div>
 
       {/* Mobile / iPhone Fixed Bottom Navigation Bar */}

@@ -273,7 +273,7 @@ async def export_journal_csv(request: Request) -> Any:
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="osrs_flip_journal.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="aurum_flip_journal.csv"'},
     )
 
 

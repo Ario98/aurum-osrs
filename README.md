@@ -1,8 +1,19 @@
-# OSRS Flip Terminal
+<p align="center">
+  <img src="frontend/public/favicon.svg" alt="Aurum Logo" width="76" height="76" />
+</p>
 
-A real-time, self-hosted Old School RuneScape (OSRS) Grand Exchange flipping, overnight swing, and arbitrage dashboard powered by the [OSRS Wiki Real-Time Prices API](https://oldschool.runescape.wiki/w/RuneScape:Real-time_Prices).
+<h1 align="center">Aurum</h1>
 
-Built for speed and clarity: cold-starts from an empty database in **~20 seconds**, updates all **4,600+ tradeable items** live over WebSockets, accounts for the **2% Grand Exchange tax** (including the 5M GP cap and Jagex's tax-exempt item list), and integrates with the official **RuneLite Dink** plugin and **Discord webhooks**.
+<p align="center">
+  <strong>Real-Time OSRS Grand Exchange Terminal</strong><br />
+  <sub>Flipping · Overnight Swings · Walk-Forward ML · Deterministic Arbitrage · Forged by <a href="https://github.com/Ario98">Ario</a></sub>
+</p>
+
+---
+
+**Aurum** is a real-time, self-hosted Old School RuneScape (OSRS) Grand Exchange flipping, overnight swing, and arbitrage terminal powered by the [OSRS Wiki Real-Time Prices API](https://oldschool.runescape.wiki/w/RuneScape:Real-time_Prices).
+
+Built for speed and clarity: cold-starts from an empty database in **~20 seconds**, updates all **4,600+ tradeable items** live over WebSockets, accounts for the **2% Grand Exchange tax** (including the 5M GP cap and Jagex's tax-exempt item list), runs leak-free **walk-forward ML** (4h & 12h horizons), and integrates with the official **RuneLite Dink** plugin and **Discord webhooks**.
 
 ---
 
@@ -69,8 +80,8 @@ Implements OSRS's May 2025+ Grand Exchange tax mechanics:
 
 ### Option 1: Docker (Recommended — Single Container)
 ```bash
-git clone https://github.com/Ario98/osrs_trading_dashboard.git
-cd osrs_trading_dashboard
+git clone https://github.com/Ario98/aurum-osrs.git
+cd aurum-osrs
 cp .env.example .env
 ```
 

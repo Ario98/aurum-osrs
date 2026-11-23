@@ -79,7 +79,7 @@ class AlertDispatcher:
             "title": title,
             "description": message,
             "color": SEVERITY_COLORS.get(severity, 0x3B82F6),
-            "footer": {"text": "OSRS Flip Terminal v2"},
+            "footer": {"text": "Aurum · OSRS GE Terminal"},
         }
         if fields:
             embed["fields"] = fields

@@ -3,11 +3,11 @@ import {
   BookOpen,
   Brain,
   Compass,
-  HelpCircle,
   Search,
   ShieldCheck,
   X,
 } from 'lucide-react';
+import { AurumMark, BRAND_NAME, BRAND_REPO_URL, BRAND_SIGNATURE, BRAND_SUBTITLE } from './AurumLogo';
 
 interface Props {
   open: boolean;
@@ -192,11 +192,9 @@ export function HelpModal({ open, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-4">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10 text-amber-300">
-              <HelpCircle className="h-4 w-4" />
-            </div>
+            <AurumMark className="h-8 w-8 shrink-0" />
             <div>
-              <h2 className="text-sm font-bold text-zinc-100">Guide & Trading Glossary</h2>
+              <h2 className="text-sm font-bold text-zinc-100">{BRAND_NAME} Guide &amp; Trading Glossary</h2>
               <p className="text-[11px] text-zinc-500">
                 Plain-English guide to AI signals, market metrics, GE tax, and flipping workflows
               </p>
@@ -420,6 +418,21 @@ export function HelpModal({ open, onClose }: Props) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Footer Signature */}
+        <div className="flex items-center justify-between border-t border-white/[0.07] bg-[#07070a] px-5 py-2.5 text-[11px] text-zinc-500">
+          <span>
+            <strong className="font-semibold tracking-wider uppercase text-zinc-400">{BRAND_NAME}</strong> · {BRAND_SUBTITLE}
+          </span>
+          <a
+            href={BRAND_REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-zinc-400 transition hover:text-amber-300"
+          >
+            {BRAND_SIGNATURE}
+          </a>
         </div>
       </div>
     </div>

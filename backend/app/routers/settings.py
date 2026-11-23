@@ -131,7 +131,7 @@ async def get_alerts(
 async def test_discord_alert(body: TestDiscordRequest, request: Request) -> dict[str, Any]:
     alerts = request.app.state.alerts
     ok = await alerts.send_discord(
-        title="OSRS Flip Terminal v2 — Connected!",
+        title="Aurum — Discord Alerts Connected!",
         message="Discord alerts are live. You will receive Dump Snipes, Instant Arbitrage, and Offer Coach warnings here.",
         severity="success",
         webhook_url=body.webhook_url or None,
