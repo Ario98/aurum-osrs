@@ -466,6 +466,9 @@ async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.Mon
     assert body["engine"]["items_tracked"] == len(state.metrics)
     assert len(body["engine"]["recompute_history"]) >= 1
     assert "pipeline_health" in body["dataset"]
+    assert body["dataset"]["retention_1h_days"] == cfg.retention_1h_days
+    assert "stored_1h_days" in body["dataset"]
+    assert body["engine"]["backfill"]["target_days"] == cfg.bootstrap_1h_background_days
     assert body["runtime"]["platform"]
 
     chk = client.post("/api/system/actions/checkpoint")
@@ -480,6 +483,19 @@ async def test_system_health_and_actions(tmp_path: Path, monkeypatch: pytest.Mon
     assert bak.status_code == 200
     assert bak.json()["ok"] is True
     assert bak.json()["filename"].startswith("osrs_terminal_")
+
+    # History backfill validation & in-flight guard (no live network calls)
+    bad_bf = client.post("/api/system/actions/backfill", json={"days": 999})
+    assert bad_bf.status_code == 422
+
+    collector.bg_active = True
+    collector.bg_target_days = 60
+    busy_bf = client.post("/api/system/actions/backfill", json={"days": 90})
+    assert busy_bf.status_code == 200
+    assert busy_bf.json()["ok"] is True
+    assert busy_bf.json()["started"] is False
+    assert busy_bf.json()["status"] == "already_running"
+    collector.bg_active = False
 
     await alerts.close()
     await db.close()

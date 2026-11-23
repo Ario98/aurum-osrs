@@ -37,6 +37,6 @@ async def trigger_ml_train(request: Request) -> dict[str, Any]:
     return ml.start_training(
         db_path=db.db_path,
         state=state,
-        lookback_days=settings.bootstrap_1h_background_days,
+        lookback_days=settings.retention_1h_days,
         on_complete=_notify_ws,
     )

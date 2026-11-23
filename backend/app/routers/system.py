@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
+from pydantic import BaseModel, Field
 
 from app.auth import require_auth
+
+
+class BackfillRequest(BaseModel):
+    days: int = Field(default=60, ge=7, le=90)
 
 router = APIRouter(prefix="/api/system", tags=["system"], dependencies=[Depends(require_auth)])
 
@@ -273,6 +278,8 @@ async def get_system_health(
             "seasonality_30d_items": seas_items,
             "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
             "wal_size_mb": round(wal_size_bytes / (1024 * 1024), 2),
+            "retention_1h_days": settings.retention_1h_days,
+            "stored_1h_days": round(int(db_stats["candles_1h"]["buckets"]) / 24.0, 1),
             "pipeline_health": {
                 "score": pipeline_score,
                 "healthy": pipeline_healthy,
@@ -300,6 +307,7 @@ async def get_system_health(
                 "active": collector.bg_active,
                 "fetched": collector.bg_fetched,
                 "total": collector.bg_total_missing,
+                "target_days": collector.bg_target_days,
                 "stage": state.bootstrap_progress.get("stage", "ready"),
             },
         },
@@ -368,5 +376,14 @@ async def action_backup_db(request: Request) -> dict[str, Any]:
     db = request.app.state.db
     backup_dir = _resolve_backup_dir(db.db_path)
     result = await repo.create_online_backup(backup_dir, keep_last=14)
+    invalidate_db_stats_cache()
+    return {"ok": True, **result}
+
+
+@router.post("/actions/backfill")
+async def action_backfill_history(body: BackfillRequest, request: Request) -> dict[str, Any]:
+    """Safe non-blocking action: expand local candles_1h history to 30d, 60d, or 90d."""
+    collector = request.app.state.collector
+    result = await collector.start_history_backfill(days=body.days)
     invalidate_db_stats_cache()
     return {"ok": True, **result}

@@ -217,6 +217,19 @@ export const api = {
       '/api/system/actions/backup',
       { method: 'POST' },
     ),
+  actionBackfillHistory: (days: number) =>
+    request<{
+      ok: boolean;
+      started: boolean;
+      status: string;
+      target_days: number;
+      missing_buckets: number;
+      est_minutes?: number;
+      message: string;
+    }>('/api/system/actions/backfill', {
+      method: 'POST',
+      body: JSON.stringify({ days }),
+    }),
 
   // Phase 5 ML & Walk-Forward Backtest
   mlStatus: () => request<MLStatusResponse>('/api/ml/status'),

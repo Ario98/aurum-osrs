@@ -51,6 +51,7 @@ class CollectorService:
         self.bg_active: bool = False
         self.bg_total_missing: int = 0
         self.bg_fetched: int = 0
+        self.bg_target_days: int = settings.bootstrap_1h_background_days
         self._gap_fill_task: Optional[asyncio.Task[Any]] = None
 
     async def start(self) -> None:
@@ -379,9 +380,76 @@ class CollectorService:
         self.ml_predictor.start_training(
             db_path=self.db.db_path,
             state=self.state,
-            lookback_days=self.settings.bootstrap_1h_background_days,
+            lookback_days=self.settings.retention_1h_days,
             on_complete=_notify,
         )
+
+    async def start_history_backfill(self, days: int) -> dict[str, Any]:
+        """On-demand non-blocking /1h backfill up to `retention_1h_days` (e.g. 30d, 60d, 90d)."""
+        max_days = max(30, self.settings.retention_1h_days)
+        target_days = max(7, min(days, max_days))
+
+        if self.bg_active or (self._gap_fill_task is not None and not self._gap_fill_task.done()):
+            return {
+                "started": False,
+                "status": "already_running",
+                "target_days": self.bg_target_days,
+                "missing_buckets": max(0, self.bg_total_missing - self.bg_fetched),
+                "message": f"Backfill already running ({self.bg_fetched}/{self.bg_total_missing} buckets).",
+            }
+
+        now = int(time.time())
+        latest_closed_1h = _floor_bucket(now - 40, 3600) - 3600
+        total_hours = target_days * 24
+        target_buckets = [latest_closed_1h - i * 3600 for i in range(total_hours)]
+        existing = await self.repo.get_existing_bucket_timestamps("candles_1h", min(target_buckets))
+        missing = [ts for ts in target_buckets if ts not in existing]
+
+        if not missing:
+            return {
+                "started": False,
+                "status": "complete",
+                "target_days": target_days,
+                "missing_buckets": 0,
+                "message": f"All {target_days} days ({total_hours:,} hourly buckets) are already stored in SQLite.",
+            }
+
+        est_min = max(1, round((len(missing) * (self.settings.wiki_min_request_interval_ms / 1000.0)) / 60.0))
+
+        async def _worker() -> None:
+            self.bg_active = True
+            self.bg_target_days = target_days
+            self.bg_total_missing = len(missing)
+            self.bg_fetched = 0
+            cutoff_ram = int(time.time()) - 8 * 86400
+            logger.info("On-demand history backfill started: %d missing 1h buckets (%dd target)", len(missing), target_days)
+            try:
+                for ts in missing:
+                    if self._stop_event.is_set():
+                        return
+                    try:
+                        actual_ts, data = await self.wiki.fetch_1h(ts)
+                        if actual_ts and data:
+                            await self.repo.upsert_candles("candles_1h", actual_ts, data)
+                            if actual_ts >= cutoff_ram:
+                                self.state.ingest_candle_bucket("1h", actual_ts, data)
+                            self.bg_fetched += 1
+                    except Exception as exc:
+                        logger.warning("On-demand 1h backfill bucket %d failed: %s", ts, exc)
+                await self.run_rollup_and_seasonality()
+                logger.info("On-demand %dd backfill complete (+%d buckets)", target_days, self.bg_fetched)
+            finally:
+                self.bg_active = False
+
+        self._gap_fill_task = asyncio.create_task(_worker(), name=f"backfill-{target_days}d")
+        return {
+            "started": True,
+            "status": "started",
+            "target_days": target_days,
+            "missing_buckets": len(missing),
+            "est_minutes": est_min,
+            "message": f"Backfilling {len(missing):,} missing hourly buckets to reach {target_days} days (~{est_min} min in background; live trading unaffected).",
+        }
 
     async def run_rollup_and_seasonality(self) -> dict[str, Any]:
         """On-demand safe action: refresh daily candles_24h rollup + 30d hour seasonality."""

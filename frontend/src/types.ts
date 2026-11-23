@@ -520,6 +520,8 @@ export interface SystemHealthResponse {
     seasonality_30d_items: number;
     db_size_mb: number;
     wal_size_mb: number;
+    retention_1h_days?: number;
+    stored_1h_days?: number;
     pipeline_health: {
       score: number;
       healthy: boolean;
@@ -551,6 +553,7 @@ export interface SystemHealthResponse {
       active: boolean;
       fetched: number;
       total: number;
+      target_days?: number;
       stage: string;
     };
   };
