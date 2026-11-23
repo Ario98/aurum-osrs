@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS active_slots (
     opened_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     source TEXT NOT NULL DEFAULT 'manual',
-    notes TEXT DEFAULT ''
+    notes TEXT DEFAULT '',
+    flip_mode TEXT NOT NULL DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS flip_history (
@@ -158,6 +159,13 @@ class Database:
         await self._conn.execute("PRAGMA busy_timeout=10000;")
         await self._conn.execute("PRAGMA foreign_keys=ON;")
         await self._conn.executescript(SCHEMA_SQL)
+        # Safe additive migration for existing SQLite databases
+        async with self._conn.execute("PRAGMA table_info(active_slots)") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if "flip_mode" not in cols:
+            await self._conn.execute(
+                "ALTER TABLE active_slots ADD COLUMN flip_mode TEXT NOT NULL DEFAULT 'active'"
+            )
         await self._conn.commit()
         logger.info("Connected to SQLite WAL database at %s", self.db_path)
 

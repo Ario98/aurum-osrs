@@ -1,4 +1,4 @@
-"""Proactive Offer Coach — monitors open GE slots and advises Hold / Relist / Bailout."""
+"""Proactive Offer Coach — Overnight-aware monitor for open GE slots (Hold / Relist / Bailout)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,14 @@ from app.engine.tax import calculate_ge_tax
 
 
 def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
-    """Attach live market context & Proactive Offer Coach advice to an active GE slot."""
+    """Attach live market context & Proactive Offer Coach advice (respecting active vs overnight mode)."""
     item_id = int(slot["item_id"])
     status = slot["status"]
     buy_price = int(slot["buy_price"])
     target_sell = int(slot["target_sell_price"])
     qty = int(slot["quantity"])
+    flip_mode = slot.get("flip_mode") or "active"
+    is_overnight = flip_mode == "overnight"
     m = state.metrics.get(item_id)
 
     now = int(time.time())
@@ -23,7 +25,7 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
 
     coach_action = "HOLD"
     coach_severity = "ok"  # ok | warning | danger | success
-    coach_message = "Offer is competitively positioned."
+    coach_message = "Overnight offer resting calmly." if is_overnight else "Offer is competitively positioned."
     recommended_price: int | None = None
 
     live_high = m.high if m else None
@@ -36,67 +38,124 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
         live_exit_tax = calculate_ge_tax(live_low, item_name=m.name, exempt=m.is_tax_exempt)
         live_exit_profit = (live_low - buy_price - live_exit_tax) * qty
 
-        if status == "BUYING":
-            # Check if our buy offer was outbid or if the item is crashing
-            if m.ofi_5m < -0.65 and m.price_change_1h_pct < -2.5:
-                coach_action = "LOWER_BID"
-                coach_severity = "warning"
-                recommended_price = max(1, live_low - max(1, int(live_low * 0.005)))
-                coach_message = f"Heavy selling pressure (OFI {m.ofi_5m:+.2f}) — lower bid to {recommended_price:,} gp or cancel."
-            elif live_low > buy_price:
-                new_buy = live_low + 1
-                new_tax = calculate_ge_tax(live_high - 1, item_name=m.name, exempt=m.is_tax_exempt)
-                new_margin = (live_high - 1) - new_buy - new_tax
-                if new_margin > 0:
+        if is_overnight:
+            # ------------------------------------------------------------------
+            # OVERNIGHT MODE: Quiet during normal swings, alerts ONLY on major breaks
+            # ------------------------------------------------------------------
+            if status == "BUYING":
+                gap_above_bid_pct = ((live_low - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
+                if gap_above_bid_pct > 5.0:
+                    new_bid = min(live_low, m.p25_7d or live_low)
                     coach_action = "RELIST_BUY"
                     coach_severity = "warning"
-                    recommended_price = new_buy
-                    coach_message = f"Outbid! Live low is {live_low:,} gp — raise buy to {new_buy:,} gp (+{new_margin:,} gp/ea net)."
-                else:
+                    recommended_price = new_bid
+                    coach_message = (
+                        f"Market ran +{gap_above_bid_pct:.1f}% above your overnight bid "
+                        f"({live_low:,} gp). Raise bid to {new_bid:,} gp or pick another overnight item."
+                    )
+                elif m.trend_7d_pct < -5.5:
                     coach_action = "CANCEL"
                     coach_severity = "danger"
-                    coach_message = f"Margin collapsed after 2% tax (live {live_low:,} -> {live_high:,}). Cancel buy offer."
-            else:
-                coach_message = f"Top of bid book ({buy_price:,} vs live low {live_low:,}). Waiting to fill."
-
-        elif status == "BOUGHT":
-            rec_sell = (live_high - 1) if (live_high - live_low >= 4) else live_high
-            coach_action = "LIST_SELL"
-            coach_severity = "success"
-            recommended_price = rec_sell
-            coach_message = f"Bought! List sell offer now at {rec_sell:,} gp."
-
-        elif status == "SELLING":
-            # Check for crash/dump bailout first
-            drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
-            if (drop_from_buy_pct <= -3.5) or (m.ofi_5m < -0.7 and m.zscore_24h < -1.8 and live_high < target_sell):
-                coach_action = "BAILOUT_WARNING"
-                coach_severity = "danger"
-                recommended_price = max(live_low, live_high - 1)
-                coach_message = (
-                    f"Dump detected ({drop_from_buy_pct:+.1f}% vs buy, OFI {m.ofi_5m:+.2f}) — "
-                    f"consider bailing at {recommended_price:,} gp to protect capital."
-                )
-            elif live_high < target_sell:
-                new_sell = live_high - 1
-                new_tax = calculate_ge_tax(new_sell, item_name=m.name, exempt=m.is_tax_exempt)
-                new_net = new_sell - buy_price - new_tax
-                coach_action = "RELIST_SELL"
-                coach_severity = "warning" if new_net >= 0 else "danger"
-                recommended_price = new_sell
-                if new_net >= 0:
-                    coach_message = f"Undercut! Live high dropped to {live_high:,} — relist at {new_sell:,} gp (still +{new_net * qty:,} gp net)."
+                    coach_message = (
+                        f"Item broke into a 7d downtrend ({m.trend_7d_pct:.1f}%). "
+                        "Cancel overnight buy to avoid waking up to a loss."
+                    )
                 else:
-                    coach_message = f"Undercut below breakeven ({live_high:,} gp). Relist at {new_sell:,} gp ({new_net * qty:,} gp) or hold for rebound."
-            elif live_high > target_sell * 1.015:
-                coach_action = "HOLD"
+                    coach_message = (
+                        f"Overnight bid resting calmly ({buy_price:,} vs live low {live_low:,}). "
+                        "Waiting for normal dip to fill."
+                    )
+
+            elif status == "BOUGHT":
+                rec_sell = max(live_high - 1, m.p75_7d or live_high)
+                coach_action = "LIST_SELL"
                 coach_severity = "success"
-                coach_message = f"Price surged to {live_high:,} gp — your sell at {target_sell:,} should fill imminently!"
-            else:
-                coach_message = f"Competitive sell ({target_sell:,} vs live high {live_high:,})."
+                recommended_price = rec_sell
+                coach_message = f"Overnight buy filled! List morning sell target at {rec_sell:,} gp."
+
+            elif status == "SELLING":
+                drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
+                broke_7d_floor = bool(m.min_7d and live_low < int(m.min_7d * 0.97))
+                if drop_from_buy_pct <= -6.0 or (broke_7d_floor and m.ofi_1h < -0.5):
+                    coach_action = "BAILOUT_WARNING"
+                    coach_severity = "danger"
+                    recommended_price = max(live_low, live_high - 1)
+                    coach_message = (
+                        f"Overnight breakdown ({drop_from_buy_pct:+.1f}% vs buy, broke 7d floor). "
+                        f"Consider bailing at {recommended_price:,} gp."
+                    )
+                elif live_high >= target_sell:
+                    coach_action = "HOLD"
+                    coach_severity = "success"
+                    coach_message = f"Live high hit {live_high:,} gp — your overnight sell ({target_sell:,}) should fill soon!"
+                else:
+                    coach_message = (
+                        f"Overnight sell resting in 7d band ({target_sell:,} vs live high {live_high:,}). Hold patiently."
+                    )
+        else:
+            # ------------------------------------------------------------------
+            # ACTIVE FAST-FLIP MODE: Tight bid/ask competitiveness & fast crash guard
+            # ------------------------------------------------------------------
+            if status == "BUYING":
+                if m.ofi_5m < -0.65 and m.price_change_1h_pct < -2.5:
+                    coach_action = "LOWER_BID"
+                    coach_severity = "warning"
+                    recommended_price = max(1, live_low - max(1, int(live_low * 0.005)))
+                    coach_message = f"Heavy selling pressure (OFI {m.ofi_5m:+.2f}) — lower bid to {recommended_price:,} gp or cancel."
+                elif live_low > buy_price:
+                    new_buy = live_low + 1
+                    new_tax = calculate_ge_tax(live_high - 1, item_name=m.name, exempt=m.is_tax_exempt)
+                    new_margin = (live_high - 1) - new_buy - new_tax
+                    if new_margin > 0:
+                        coach_action = "RELIST_BUY"
+                        coach_severity = "warning"
+                        recommended_price = new_buy
+                        coach_message = f"Outbid! Live low is {live_low:,} gp — raise buy to {new_buy:,} gp (+{new_margin:,} gp/ea net)."
+                    else:
+                        coach_action = "CANCEL"
+                        coach_severity = "danger"
+                        coach_message = f"Margin collapsed after 2% tax (live {live_low:,} -> {live_high:,}). Cancel buy offer."
+                else:
+                    coach_message = f"Top of bid book ({buy_price:,} vs live low {live_low:,}). Waiting to fill."
+
+            elif status == "BOUGHT":
+                rec_sell = (live_high - 1) if (live_high - live_low >= 4) else live_high
+                coach_action = "LIST_SELL"
+                coach_severity = "success"
+                recommended_price = rec_sell
+                coach_message = f"Bought! List sell offer now at {rec_sell:,} gp."
+
+            elif status == "SELLING":
+                drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
+                if (drop_from_buy_pct <= -3.5) or (m.ofi_5m < -0.7 and m.zscore_24h < -1.8 and live_high < target_sell):
+                    coach_action = "BAILOUT_WARNING"
+                    coach_severity = "danger"
+                    recommended_price = max(live_low, live_high - 1)
+                    coach_message = (
+                        f"Dump detected ({drop_from_buy_pct:+.1f}% vs buy, OFI {m.ofi_5m:+.2f}) — "
+                        f"consider bailing at {recommended_price:,} gp to protect capital."
+                    )
+                elif live_high < target_sell:
+                    new_sell = live_high - 1
+                    new_tax = calculate_ge_tax(new_sell, item_name=m.name, exempt=m.is_tax_exempt)
+                    new_net = new_sell - buy_price - new_tax
+                    coach_action = "RELIST_SELL"
+                    coach_severity = "warning" if new_net >= 0 else "danger"
+                    recommended_price = new_sell
+                    if new_net >= 0:
+                        coach_message = f"Undercut! Live high dropped to {live_high:,} — relist at {new_sell:,} gp (still +{new_net * qty:,} gp net)."
+                    else:
+                        coach_message = f"Undercut below breakeven ({live_high:,} gp). Relist at {new_sell:,} gp ({new_net * qty:,} gp) or hold for rebound."
+                elif live_high > target_sell * 1.015:
+                    coach_action = "HOLD"
+                    coach_severity = "success"
+                    coach_message = f"Price surged to {live_high:,} gp — your sell at {target_sell:,} should fill imminently!"
+                else:
+                    coach_message = f"Competitive sell ({target_sell:,} vs live high {live_high:,})."
 
     return {
         **slot,
+        "flip_mode": flip_mode,
         "icon": m.icon if m else "",
         "elapsed_minutes": round(elapsed_min, 1),
         "live_high": live_high,

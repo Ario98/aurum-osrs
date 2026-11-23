@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
-import { AlertTriangle, Check, Copy, Flame, Info, Play, TrendingUp, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Flame, Info, Moon, Play, TrendingUp, X, Zap } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChartPoint, ItemMetrics } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
@@ -17,6 +17,7 @@ interface Props {
     quantity: number;
     buy_price: number;
     target_sell_price: number;
+    flip_mode: 'active' | 'overnight';
   }) => Promise<void>;
 }
 
@@ -44,6 +45,7 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
   const [buyInput, setBuyInput] = useState<number>(0);
   const [sellInput, setSellInput] = useState<number>(0);
   const [qtyInput, setQtyInput] = useState<number>(1);
+  const [flipMode, setFlipMode] = useState<'active' | 'overnight'>('active');
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -294,6 +296,7 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
         quantity: safeQty,
         buy_price: safeBuy,
         target_sell_price: safeSell,
+        flip_mode: flipMode,
       });
       onClose();
     } finally {
@@ -782,8 +785,32 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
               )}
             </div>
 
-            {/* Submit CTA */}
-            <div className="mt-5">
+            {/* Coach Mode Selector + Submit CTA */}
+            <div className="mt-5 space-y-2.5">
+              <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-white/[0.08] bg-[#060608] p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setFlipMode('active')}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
+                    flipMode === 'active'
+                      ? 'bg-white/[0.12] text-white'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Zap className="h-3.5 w-3.5 text-amber-400" /> Active Coach
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFlipMode('overnight')}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 font-semibold transition ${
+                    flipMode === 'overnight'
+                      ? 'bg-indigo-500/25 text-indigo-200'
+                      : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  <Moon className="h-3.5 w-3.5 text-indigo-300" /> Overnight Coach
+                </button>
+              </div>
               <button
                 onClick={handleSubmit}
                 disabled={submitting || slotsFull || safeBuy <= 0 || safeSell <= 0}
@@ -794,7 +821,7 @@ export function ItemModal({ itemId, cashStack, freeSlots, slotsFull, onClose, on
                   ? 'All 8 GE Slots Full'
                   : submitting
                     ? 'Assigning Slot...'
-                    : `Start Flip (${safeQty.toLocaleString()}x @ ${formatGp(safeBuy)})`}
+                    : `Start ${flipMode === 'overnight' ? 'Overnight' : 'Flip'} (${safeQty.toLocaleString()}x @ ${formatGp(safeBuy)})`}
               </button>
             </div>
           </div>

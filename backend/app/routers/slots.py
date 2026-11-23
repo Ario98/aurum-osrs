@@ -23,6 +23,7 @@ class SlotCreateRequest(BaseModel):
     quantity: int = Field(ge=1)
     buy_price: int = Field(ge=1)
     target_sell_price: int = Field(ge=1)
+    flip_mode: str = Field(default="active", pattern="^(active|overnight)$")
     notes: str = ""
 
 
@@ -32,6 +33,7 @@ class SlotUpdateRequest(BaseModel):
     filled_quantity: Optional[int] = Field(default=None, ge=0)
     buy_price: Optional[int] = Field(default=None, ge=1)
     target_sell_price: Optional[int] = Field(default=None, ge=1)
+    flip_mode: Optional[str] = Field(default=None, pattern="^(active|overnight)$")
     notes: Optional[str] = None
 
 
@@ -81,6 +83,7 @@ async def create_or_assign_slot(body: SlotCreateRequest, request: Request) -> di
         filled_quantity=body.quantity if body.status in ("BOUGHT", "SELLING") else 0,
         source="manual",
         notes=body.notes,
+        flip_mode=body.flip_mode,
     )
 
     if body.status in ("BOUGHT", "SELLING"):
@@ -110,6 +113,7 @@ async def update_slot(slot_number: int, body: SlotUpdateRequest, request: Reques
         else (new_qty if new_status in ("BOUGHT", "SELLING") else int(existing["filled_quantity"]))
     )
     new_notes = body.notes if body.notes is not None else existing.get("notes", "")
+    new_mode = body.flip_mode or existing.get("flip_mode", "active")
 
     # Record buy limit usage when transitioning BUYING -> BOUGHT/SELLING
     if existing["status"] == "BUYING" and new_status in ("BOUGHT", "SELLING"):
@@ -133,6 +137,7 @@ async def update_slot(slot_number: int, body: SlotUpdateRequest, request: Reques
         source=existing.get("source", "manual"),
         notes=new_notes,
         opened_at=int(existing["opened_at"]),
+        flip_mode=new_mode,
     )
     await request.app.state.ws_hub.broadcast({"type": "slots_updated"})
     return evaluate_slot(updated, state)

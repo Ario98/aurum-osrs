@@ -170,6 +170,7 @@ export interface ActiveSlot {
   opened_at: number;
   updated_at: number;
   source: string;
+  flip_mode: 'active' | 'overnight';
   notes: string;
   elapsed_minutes: number;
   live_high: number | null;

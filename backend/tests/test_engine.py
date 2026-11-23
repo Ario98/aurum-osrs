@@ -195,6 +195,22 @@ def test_offer_coach_signals():
     assert res2["coach_action"] == "BAILOUT_WARNING"
     assert res2["coach_severity"] == "danger"
 
+    # Overnight mode stays calm on a normal ~2% lower bid instead of nagging RELIST_BUY
+    slot_night_calm = {
+        "slot_number": 3,
+        "item_id": 4151,
+        "item_name": "Abyssal whip",
+        "status": "BUYING",
+        "quantity": 5,
+        "buy_price": 1_475_000,  # ~1.7% below 1.5M live low -> normal overnight dip bid
+        "target_sell_price": 1_560_000,
+        "opened_at": now - 600,
+        "flip_mode": "overnight",
+    }
+    res_night = evaluate_slot(slot_night_calm, state)
+    assert res_night["coach_action"] == "HOLD"
+    assert res_night["flip_mode"] == "overnight"
+
 
 @pytest.mark.asyncio
 async def test_dink_webhook_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -71,10 +71,31 @@ async def receive_dink_webhook(
         item_name = meta.get("name") or f"Item #{item_id}"
 
     existing = await repo.get_slot(slot_num)
-    suggested_sell = (m.suggested_sell if m and m.suggested_sell else int(price_each * 1.03))
+    # Smart slot-matching: if user clicked Start Flip / Start Night into a different slot number,
+    # find that matching item slot so Dink seamlessly adopts its flip_mode, target_sell, & opened_at
+    # without leaving duplicate slots behind!
+    matched_other: Optional[dict[str, Any]] = None
+    if not existing or int(existing["item_id"]) != item_id:
+        for s in await repo.get_active_slots():
+            if int(s["item_id"]) == item_id:
+                matched_other = s
+                break
+
+    prior = existing if (existing and int(existing["item_id"]) == item_id) else matched_other
+    inherited_mode = (prior.get("flip_mode") or "active") if prior else "active"
+    inherited_opened = int(prior["opened_at"]) if prior else None
+
+    default_sell = (
+        max(m.high - 1, m.p75_7d or m.high)
+        if (inherited_mode == "overnight" and m and m.high)
+        else (m.suggested_sell if m and m.suggested_sell else int(price_each * 1.03))
+    )
+    suggested_sell = int(prior["target_sell_price"]) if prior else default_sell
     buy_limit = int(meta.get("buy_limit") or 0)
 
     if ge_status in ("BUYING", "BUY"):
+        if matched_other and int(matched_other["slot_number"]) != slot_num:
+            await repo.delete_slot(int(matched_other["slot_number"]))
         await repo.upsert_slot(
             slot_number=slot_num,
             item_id=item_id,
@@ -84,8 +105,12 @@ async def receive_dink_webhook(
             buy_price=price_each,
             target_sell_price=suggested_sell,
             source="dink",
+            opened_at=inherited_opened,
+            flip_mode=inherited_mode,
         )
     elif ge_status == "BOUGHT":
+        if matched_other and int(matched_other["slot_number"]) != slot_num:
+            await repo.delete_slot(int(matched_other["slot_number"]))
         await repo.upsert_slot(
             slot_number=slot_num,
             item_id=item_id,
@@ -96,7 +121,8 @@ async def receive_dink_webhook(
             buy_price=price_each,
             target_sell_price=suggested_sell,
             source="dink",
-            opened_at=int(existing["opened_at"]) if existing and int(existing["item_id"]) == item_id else None,
+            opened_at=inherited_opened,
+            flip_mode=inherited_mode,
         )
         await repo.record_buy_limit_usage(item_id, item_name, quantity, buy_limit)
         await alerts.emit(
@@ -111,7 +137,9 @@ async def receive_dink_webhook(
             send_to_discord=False,
         )
     elif ge_status in ("SELLING", "SELL"):
-        buy_p = int(existing["buy_price"]) if existing and int(existing["item_id"]) == item_id else (m.low or price_each if m else price_each)
+        if matched_other and int(matched_other["slot_number"]) != slot_num:
+            await repo.delete_slot(int(matched_other["slot_number"]))
+        buy_p = int(prior["buy_price"]) if prior else (m.low or price_each if m else price_each)
         await repo.upsert_slot(
             slot_number=slot_num,
             item_id=item_id,
@@ -122,18 +150,11 @@ async def receive_dink_webhook(
             buy_price=buy_p,
             target_sell_price=price_each,
             source="dink",
-            opened_at=int(existing["opened_at"]) if existing and int(existing["item_id"]) == item_id else None,
+            opened_at=inherited_opened,
+            flip_mode=inherited_mode,
         )
     elif ge_status == "SOLD":
-        # Match buy price from existing slot (or fallback to any matching BOUGHT slot for this item)
-        matched_slot = existing if (existing and int(existing["item_id"]) == item_id) else None
-        if not matched_slot:
-            all_slots = await repo.get_active_slots()
-            for s in all_slots:
-                if int(s["item_id"]) == item_id and s["status"] in ("BOUGHT", "SELLING"):
-                    matched_slot = s
-                    break
-
+        matched_slot = prior
         if matched_slot:
             buy_p = int(matched_slot["buy_price"])
             opened_at = int(matched_slot["opened_at"])
@@ -174,8 +195,21 @@ async def receive_dink_webhook(
             )
         else:
             await repo.delete_slot(slot_num)
+            await alerts.emit(
+                alert_type="DINK_SOLD_UNTRACKED",
+                dedupe_key=f"sold_untracked_{slot_num}_{item_id}_{int(time.time()) // 15}",
+                title=f"Dink Sold: {quantity:,}x {item_name} @ {price_each:,} gp",
+                message="Completed sale received from RuneLite Dink (no prior tracked buy price).",
+                severity="info",
+                item_id=item_id,
+                item_name=item_name,
+                cooldown_sec=5,
+                send_to_discord=False,
+            )
     elif ge_status in ("CANCELLED_BUY", "CANCELLED_SELL", "EMPTY"):
         await repo.delete_slot(slot_num)
+        if matched_other and int(matched_other["slot_number"]) != slot_num:
+            await repo.delete_slot(int(matched_other["slot_number"]))
 
     await ws_hub.broadcast({"type": "slots_updated", "source": "dink"})
     logger.info("Processed Dink GE event: slot=%d status=%s item=%s qty=%d price=%d", slot_num, ge_status, item_name, quantity, price_each)

@@ -276,17 +276,19 @@ class Repository:
         source: str = "manual",
         notes: str = "",
         opened_at: Optional[int] = None,
+        flip_mode: str = "active",
     ) -> dict[str, Any]:
         now = int(time.time())
         open_ts = opened_at or now
+        mode_val = "overnight" if flip_mode == "overnight" else "active"
         async with self.db.write_lock:
             await self.db.conn.execute(
                 """
                 INSERT INTO active_slots (
                     slot_number, item_id, item_name, status, quantity, filled_quantity,
-                    buy_price, target_sell_price, opened_at, updated_at, source, notes
+                    buy_price, target_sell_price, opened_at, updated_at, source, notes, flip_mode
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(slot_number) DO UPDATE SET
                     item_id = excluded.item_id,
                     item_name = excluded.item_name,
@@ -297,7 +299,8 @@ class Repository:
                     target_sell_price = excluded.target_sell_price,
                     updated_at = excluded.updated_at,
                     source = excluded.source,
-                    notes = excluded.notes
+                    notes = excluded.notes,
+                    flip_mode = excluded.flip_mode
                 """,
                 (
                     slot_number,
@@ -312,6 +315,7 @@ class Repository:
                     now,
                     source,
                     notes,
+                    mode_val,
                 ),
             )
             await self.db.conn.commit()

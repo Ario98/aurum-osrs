@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   Bell,
   BookOpen,
+  ChevronDown,
   Coins,
   FlaskConical,
   Lock,
@@ -16,7 +17,9 @@ import {
 } from 'lucide-react';
 import { api } from './api/client';
 import { AlertDrawer, AlertToastStack } from './components/AlertToast';
+import { CommandPalette } from './components/CommandPalette';
 import { ItemModal } from './components/ItemModal';
+import { SlotRibbon } from './components/SlotRibbon';
 import { useMarketSocket } from './hooks/useMarketSocket';
 import { Arbitrage } from './pages/Arbitrage';
 import { CommandCenter } from './pages/CommandCenter';
@@ -34,9 +37,17 @@ import type {
   TradeCallsResponse,
   UserSettings,
 } from './types';
-import { playAlertChime } from './utils/format';
+import { formatGp, parseGpInput, playAlertChime } from './utils/format';
 
 type NavTab = 'command' | 'overnight' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
+
+const BANK_PRESETS = [
+  { label: '5M', value: 5_000_000 },
+  { label: '25M', value: 25_000_000 },
+  { label: '100M', value: 100_000_000 },
+  { label: '500M', value: 500_000_000 },
+  { label: '1B', value: 1_000_000_000 },
+];
 
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
@@ -50,6 +61,10 @@ export default function App() {
 
   // User trading state
   const [cashStack, setCashStack] = useState(25_000_000);
+  const [cashMenuOpen, setCashMenuOpen] = useState(false);
+  const [cashDraft, setCashDraft] = useState('25.00M');
+  const cashMenuRef = useRef<HTMLDivElement | null>(null);
+
   const [mode, setMode] = useState<StrategyMode>('auto_mix');
   const [members, setMembers] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -60,10 +75,39 @@ export default function App() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [toasts, setToasts] = useState<AlertItem[]>([]);
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
 
   const [tickVersion, setTickVersion] = useState(0);
   const [slotsVersion, setSlotsVersion] = useState(0);
+
+  // Global Ctrl+K / Cmd+K shortcut
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Close bank popover on outside click
+  useEffect(() => {
+    if (!cashMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (cashMenuRef.current && !cashMenuRef.current.contains(e.target as Node)) {
+        setCashMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [cashMenuOpen]);
+
+  useEffect(() => {
+    setCashDraft(formatGp(cashStack, true));
+  }, [cashStack]);
 
   useEffect(() => {
     api
@@ -163,6 +207,21 @@ export default function App() {
     },
   });
 
+  const updateCash = (val: number) => {
+    setCashStack(val);
+    setCashMenuOpen(false);
+    api.saveSettings({ cash_stack: val }).catch(() => {});
+  };
+
+  const commitCashDraft = () => {
+    const parsed = parseGpInput(cashDraft);
+    if (parsed && parsed >= 10_000) {
+      updateCash(parsed);
+    } else {
+      setCashDraft(formatGp(cashStack, true));
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -183,6 +242,7 @@ export default function App() {
       quantity: call.quantity,
       buy_price: call.buy_price,
       target_sell_price: call.sell_price,
+      flip_mode: call.strategy === 'overnight' ? 'overnight' : 'active',
     });
     await refreshSlots();
   };
@@ -193,6 +253,7 @@ export default function App() {
     quantity: number;
     buy_price: number;
     target_sell_price: number;
+    flip_mode: 'active' | 'overnight';
   }) => {
     await api.startSlot({
       ...params,
@@ -209,6 +270,7 @@ export default function App() {
       quantity: flip.quantity,
       buy_price: flip.buy_price,
       target_sell_price: flip.sell_price,
+      flip_mode: 'overnight',
     });
     await refreshSlots();
   };
@@ -265,182 +327,298 @@ export default function App() {
     );
   }
 
-  const navItems: { key: NavTab; label: string; icon: React.ReactNode }[] = [
-    { key: 'command', label: 'Command Center', icon: <Zap className="h-3.5 w-3.5" /> },
-    { key: 'overnight', label: 'Overnight', icon: <Moon className="h-3.5 w-3.5" /> },
-    { key: 'scanner', label: 'Scanner (4.6k)', icon: <Search className="h-3.5 w-3.5" /> },
-    { key: 'arbitrage', label: 'Arbitrage', icon: <FlaskConical className="h-3.5 w-3.5" /> },
-    { key: 'journal', label: 'Journal & Limits', icon: <BookOpen className="h-3.5 w-3.5" /> },
-    { key: 'settings', label: 'Settings & Dink', icon: <SettingsIcon className="h-3.5 w-3.5" /> },
+  const navItems: { key: NavTab; label: string; shortLabel: string; icon: React.ReactNode }[] = [
+    { key: 'command', label: 'Trade Calls', shortLabel: 'Trade', icon: <Zap className="h-[18px] w-[18px]" /> },
+    { key: 'overnight', label: 'Overnight', shortLabel: 'Night', icon: <Moon className="h-[18px] w-[18px]" /> },
+    { key: 'scanner', label: 'Market Scanner', shortLabel: 'Scan', icon: <Search className="h-[18px] w-[18px]" /> },
+    { key: 'arbitrage', label: 'Arbitrage', shortLabel: 'Arb', icon: <FlaskConical className="h-[18px] w-[18px]" /> },
+    { key: 'journal', label: 'Journal & Limits', shortLabel: 'Journal', icon: <BookOpen className="h-[18px] w-[18px]" /> },
+    { key: 'settings', label: 'Settings & Dink', shortLabel: 'Config', icon: <SettingsIcon className="h-[18px] w-[18px]" /> },
   ];
 
   return (
-    <div className="min-h-screen bg-[#050507] text-zinc-100 flex flex-col">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#050507]/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-zinc-100 text-zinc-950 font-black">
-                <Coins className="h-4 w-4" />
-              </div>
-              <div>
-                <div className="text-sm font-bold tracking-tight text-zinc-100 leading-none">
-                  OSRS Flip Terminal <span className="text-amber-400">v2</span>
-                </div>
-                <div className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-500">
-                  <span
-                    className={`inline-block h-1.5 w-1.5 rounded-full ${
-                      connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-                    }`}
-                  />
-                  {status?.ready ? (
-                    <span>
-                      Live · {status.items_tracked.toLocaleString()} items · {status.last_recompute_ms}ms
-                      {!status.enrichment_done && ' · Enriching 7d...'}
-                    </span>
-                  ) : (
-                    <span>Fast bootstrap ({status?.bootstrap.stage || 'starting'})...</span>
-                  )}
-                </div>
-              </div>
-            </div>
+    <div className="min-h-screen text-zinc-100 flex">
+      {/* Desktop Slim Left Icon Rail */}
+      <aside className="hidden md:flex fixed inset-y-0 left-0 z-40 w-[68px] flex-col items-center justify-between border-r border-white/[0.07] bg-[#07070a]/95 py-3.5 backdrop-blur-xl">
+        <div className="flex flex-col items-center gap-5 w-full px-2">
+          {/* Logo Mark */}
+          <button
+            onClick={() => setActiveTab('command')}
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-500 text-zinc-950 shadow-[0_0_24px_rgba(245,158,11,0.22)] transition hover:scale-105"
+            title="OSRS Flip Terminal v2"
+          >
+            <Coins className="h-5 w-5" />
+          </button>
 
-            <nav className="flex items-center gap-1">
-              {navItems.map((n) => (
+          {/* Navigation Icons */}
+          <nav className="flex flex-col items-center gap-1.5 w-full">
+            {navItems.map((n) => {
+              const active = activeTab === n.key;
+              return (
                 <button
                   key={n.key}
                   onClick={() => setActiveTab(n.key)}
-                  className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-                    activeTab === n.key
+                  title={n.label}
+                  className={`group relative flex h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl transition ${
+                    active
                       ? 'bg-white/[0.1] text-white'
                       : 'text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200'
                   }`}
                 >
+                  {active && (
+                    <span className="absolute left-0 top-2.5 bottom-2.5 w-[2.5px] rounded-r-full bg-amber-400" />
+                  )}
                   {n.icon}
-                  <span className="hidden sm:inline">{n.label}</span>
+                  <span className="text-[9px] font-medium leading-none">{n.shortLabel}</span>
                 </button>
-              ))}
-            </nav>
-          </div>
+              );
+            })}
+          </nav>
+        </div>
 
-          <div className="flex items-center gap-2">
+        {/* Bottom Utility Icons */}
+        <div className="flex flex-col items-center gap-2 px-2 w-full">
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-lg"
+            title={
+              status?.ready
+                ? `Live · ${status.items_tracked.toLocaleString()} items · ${status.last_recompute_ms}ms`
+                : 'Bootstrapping...'
+            }
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connected && status?.ready
+                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]'
+                  : 'bg-amber-400 animate-pulse'
+              }`}
+            />
+          </div>
+          {authRequired && (
             <button
-              onClick={() => setSoundEnabled((s) => !s)}
-              className="rounded-xl border border-white/[0.08] bg-[#0c0c0f] p-2 text-zinc-400 hover:text-zinc-100"
-              title={soundEnabled ? 'Mute alert chime' : 'Enable alert chime'}
+              onClick={async () => {
+                await api.logout();
+                setAuthenticated(false);
+              }}
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 hover:bg-white/[0.05] hover:text-rose-400"
+              title="Sign out"
             >
-              {soundEnabled ? <Volume2 className="h-4 w-4 text-emerald-400" /> : <VolumeX className="h-4 w-4" />}
+              <LogOut className="h-4 w-4" />
             </button>
+          )}
+        </div>
+      </aside>
+
+      {/* Main Column */}
+      <div className="flex flex-1 flex-col md:pl-[68px] min-w-0 pb-16 md:pb-0">
+        {/* Persistent Top Command Bar */}
+        <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#060609]/85 backdrop-blur-xl">
+          <div className="mx-auto flex h-14 max-w-[1520px] items-center justify-between gap-3 px-4">
+            {/* Left: Ctrl+K Instant Search Trigger */}
             <button
-              onClick={() => setAlertDrawerOpen(true)}
-              className="relative rounded-xl border border-white/[0.08] bg-[#0c0c0f] p-2 text-zinc-300 hover:text-white"
-              title="Open Alerts Feed"
+              onClick={() => setPaletteOpen(true)}
+              className="flex flex-1 max-w-md items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#0c0c10] px-3.5 py-2 text-xs text-zinc-400 hover:border-white/[0.16] hover:text-zinc-200 transition"
             >
-              <Bell className="h-4 w-4" />
-              {alerts.length > 0 && (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-zinc-950">
-                  {Math.min(99, alerts.length)}
+              <span className="flex items-center gap-2 truncate">
+                <Search className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                <span className="truncate">
+                  Search {status?.items_tracked ? status.items_tracked.toLocaleString() : '4,682'} OSRS items...
                 </span>
-              )}
+              </span>
+              <kbd className="hidden sm:inline-flex items-center rounded-md border border-white/[0.1] bg-black/50 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500">
+                Ctrl K
+              </kbd>
             </button>
-            {authRequired && (
+
+            {/* Right: Persistent Cash Stack, Members Toggle, Alerts */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Cash Stack Popover */}
+              <div className="relative" ref={cashMenuRef}>
+                <button
+                  onClick={() => setCashMenuOpen((o) => !o)}
+                  className="flex items-center gap-1.5 rounded-xl border border-white/[0.09] bg-[#0c0c10] px-3 py-1.5 text-xs hover:border-white/[0.18] transition"
+                >
+                  <Coins className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="font-bold text-zinc-100 font-mono-num">{formatGp(cashStack, true)}</span>
+                  <ChevronDown className="h-3 w-3 text-zinc-500" />
+                </button>
+
+                {cashMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-60 rounded-2xl border border-white/[0.12] bg-[#0d0d12] p-3.5 shadow-2xl space-y-3 z-50">
+                    <div className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                      Flipping Cash Stack
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        value={cashDraft}
+                        onChange={(e) => setCashDraft(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && commitCashDraft()}
+                        className="flex-1 rounded-lg border border-white/[0.1] bg-[#060608] px-2.5 py-1.5 text-xs font-bold text-zinc-100 font-mono-num outline-none focus:border-white/30"
+                        placeholder="e.g. 50M"
+                      />
+                      <button
+                        onClick={commitCashDraft}
+                        className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs font-bold text-zinc-950 hover:bg-white"
+                      >
+                        Set
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1">
+                      {BANK_PRESETS.map((p) => (
+                        <button
+                          key={p.label}
+                          onClick={() => updateCash(p.value)}
+                          className={`rounded-lg py-1 text-[11px] font-semibold transition ${
+                            cashStack === p.value
+                              ? 'bg-amber-400 text-zinc-950'
+                              : 'bg-white/[0.05] text-zinc-400 hover:bg-white/[0.1] hover:text-white'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Members / F2P Toggle */}
               <button
-                onClick={async () => {
-                  await api.logout();
-                  setAuthenticated(false);
+                onClick={() => {
+                  const next = !members;
+                  setMembers(next);
+                  api.saveSettings({ members: next }).catch(() => {});
                 }}
-                className="rounded-xl border border-white/[0.08] bg-[#0c0c0f] p-2 text-zinc-400 hover:text-rose-400"
-                title="Sign out"
+                className="hidden sm:flex items-center rounded-xl border border-white/[0.08] bg-[#0c0c10] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:border-white/[0.18] transition"
+                title="Toggle Members vs F2P items"
               >
-                <LogOut className="h-4 w-4" />
+                {members ? 'P2P' : 'F2P'}
               </button>
-            )}
+
+              {/* Sound Chime */}
+              <button
+                onClick={() => setSoundEnabled((s) => !s)}
+                className="rounded-xl border border-white/[0.08] bg-[#0c0c10] p-2 text-zinc-400 hover:text-zinc-100"
+                title={soundEnabled ? 'Mute alert chime' : 'Enable alert chime'}
+              >
+                {soundEnabled ? <Volume2 className="h-3.5 w-3.5 text-emerald-400" /> : <VolumeX className="h-3.5 w-3.5" />}
+              </button>
+
+              {/* Alerts Bell */}
+              <button
+                onClick={() => setAlertDrawerOpen(true)}
+                className="relative rounded-xl border border-white/[0.08] bg-[#0c0c10] p-2 text-zinc-300 hover:text-white"
+                title="Alerts Feed"
+              >
+                <Bell className="h-3.5 w-3.5" />
+                {alerts.length > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-zinc-950">
+                    {Math.min(99, alerts.length)}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Fast Bootstrap Banner */}
-      {status && !status.ready && (
-        <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 flex items-center justify-center gap-2">
-          <Activity className="h-4 w-4 animate-spin text-amber-400" />
-          <span>
-            Running 30-second tiered bootstrap ({status.bootstrap.stage}) — 1h buckets:{' '}
-            <strong>{status.bootstrap.buckets_1h_loaded}</strong>, 5m buckets:{' '}
-            <strong>{status.bootstrap.buckets_5m_loaded}</strong>. Trade calls will populate automatically.
-          </span>
-        </div>
-      )}
+        {/* Persistent 8-Slot Live Ribbon (always accessible across every screen!) */}
+        <SlotRibbon
+          slots={slots}
+          onUpdateSlot={async (slotNum, updates) => {
+            await api.updateSlot(slotNum, updates);
+            await refreshSlots();
+          }}
+          onCompleteSlot={async (slotNum, sellPrice) => {
+            await api.completeSlot(slotNum, { sell_price: sellPrice });
+            await refreshSlots();
+          }}
+          onClearSlot={async (slotNum) => {
+            await api.deleteSlot(slotNum);
+            await refreshSlots();
+          }}
+          onOpenChart={setSelectedItemId}
+        />
 
-      {/* Main Content */}
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-5">
-        {activeTab === 'command' && (
-          <CommandCenter
-            cashStack={cashStack}
-            onChangeCashStack={(val) => {
-              setCashStack(val);
-              api.saveSettings({ cash_stack: val }).catch(() => {});
-            }}
-            mode={mode}
-            onChangeMode={setMode}
-            members={members}
-            onChangeMembers={(m) => {
-              setMembers(m);
-              api.saveSettings({ members: m }).catch(() => {});
-            }}
-            tradeData={tradeData}
-            slots={slots}
-            loading={loadingTrades}
-            onRefresh={refreshTradeCalls}
-            onStartFlip={handleStartFlip}
-            onUpdateSlot={async (slotNum, updates) => {
-              await api.updateSlot(slotNum, updates);
-              await refreshSlots();
-            }}
-            onCompleteSlot={async (slotNum, sellPrice) => {
-              await api.completeSlot(slotNum, { sell_price: sellPrice });
-              await refreshSlots();
-            }}
-            onClearSlot={async (slotNum) => {
-              await api.deleteSlot(slotNum);
-              await refreshSlots();
-            }}
-            onOpenChart={setSelectedItemId}
-          />
+        {/* Fast Bootstrap Banner */}
+        {status && !status.ready && (
+          <div className="border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center text-xs text-amber-200 flex items-center justify-center gap-2">
+            <Activity className="h-3.5 w-3.5 animate-spin text-amber-400" />
+            <span>
+              Fast bootstrap ({status.bootstrap.stage}) — 1h: <strong>{status.bootstrap.buckets_1h_loaded}</strong>, 5m:{' '}
+              <strong>{status.bootstrap.buckets_5m_loaded}</strong>
+            </span>
+          </div>
         )}
 
-        {activeTab === 'overnight' && (
-          <Overnight
-            cashStack={cashStack}
-            onChangeCashStack={(val) => {
-              setCashStack(val);
-              api.saveSettings({ cash_stack: val }).catch(() => {});
-            }}
-            members={members}
-            slotsFull={slots.length >= 8}
-            tickVersion={tickVersion}
-            slotsVersion={slotsVersion}
-            onStartOvernight={handleStartOvernightFlip}
-            onOpenChart={setSelectedItemId}
-          />
-        )}
+        {/* Main Workspace Canvas */}
+        <main className="mx-auto w-full max-w-[1520px] flex-1 px-4 py-6">
+          {activeTab === 'command' && (
+            <CommandCenter
+              cashStack={cashStack}
+              mode={mode}
+              onChangeMode={setMode}
+              tradeData={tradeData}
+              slotsFull={slots.length >= 8}
+              loading={loadingTrades}
+              onRefresh={refreshTradeCalls}
+              onStartFlip={handleStartFlip}
+              onOpenChart={setSelectedItemId}
+            />
+          )}
 
-        {activeTab === 'scanner' && (
-          <Scanner members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
-        )}
+          {activeTab === 'overnight' && (
+            <Overnight
+              cashStack={cashStack}
+              members={members}
+              slotsFull={slots.length >= 8}
+              tickVersion={tickVersion}
+              slotsVersion={slotsVersion}
+              onStartOvernight={handleStartOvernightFlip}
+              onOpenChart={setSelectedItemId}
+            />
+          )}
 
-        {activeTab === 'arbitrage' && (
-          <Arbitrage members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
-        )}
+          {activeTab === 'scanner' && (
+            <Scanner members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
+          )}
 
-        {activeTab === 'journal' && (
-          <Journal slotsVersion={slotsVersion} onOpenChart={setSelectedItemId} />
-        )}
+          {activeTab === 'arbitrage' && (
+            <Arbitrage members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
+          )}
 
-        {activeTab === 'settings' && <Settings onSettingsSaved={handleSettingsSaved} />}
-      </main>
+          {activeTab === 'journal' && (
+            <Journal slotsVersion={slotsVersion} onOpenChart={setSelectedItemId} />
+          )}
 
-      {/* Wide Centered Item Modal + Alerts */}
+          {activeTab === 'settings' && <Settings onSettingsSaved={handleSettingsSaved} />}
+        </main>
+      </div>
+
+      {/* Mobile / iPhone Fixed Bottom Navigation Bar */}
+      <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
+        {navItems.map((n) => {
+          const active = activeTab === n.key;
+          return (
+            <button
+              key={n.key}
+              onClick={() => setActiveTab(n.key)}
+              className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 text-[10px] font-medium transition ${
+                active ? 'text-amber-300' : 'text-zinc-500'
+              }`}
+            >
+              {n.icon}
+              <span>{n.shortLabel}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Modals & Overlays */}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onSelectItem={setSelectedItemId}
+      />
       <ItemModal
         itemId={selectedItemId}
         cashStack={cashStack}

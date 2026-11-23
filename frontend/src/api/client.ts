@@ -123,6 +123,7 @@ export const api = {
     quantity: number;
     buy_price: number;
     target_sell_price: number;
+    flip_mode?: 'active' | 'overnight';
   }) =>
     request<ActiveSlot>('/api/slots', {
       method: 'POST',
@@ -135,6 +136,7 @@ export const api = {
       quantity?: number;
       buy_price?: number;
       target_sell_price?: number;
+      flip_mode?: 'active' | 'overnight';
     },
   ) =>
     request<ActiveSlot>(`/api/slots/${slotNumber}`, {
