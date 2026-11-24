@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     wiki_timeout_seconds: float = 20.0
 
     # Polling & tiered bootstrap windows
-    latest_poll_seconds: int = 20
+    latest_poll_seconds: int = 10
     bootstrap_1h_fast_hours: int = 24       # Blocking fast bootstrap (~24 calls)
     bootstrap_5m_fast_hours: int = 2        # Blocking fast bootstrap (~24 calls)
     bootstrap_1h_background_days: int = 30  # Non-blocking 30-day hourly history (~4-5 min) for seasonality & Phase 5 ML

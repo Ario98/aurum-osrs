@@ -255,8 +255,8 @@ class CollectorService:
         await self.broadcast_cb({"type": "enrichment_complete", "progress": self.state.bootstrap_progress})
 
     async def _latest_loop(self) -> None:
-        """Poll /latest every 20s, recompute in <5ms, run Offer Coach & Alerts, push WS tick."""
-        interval = max(10, self.settings.latest_poll_seconds)
+        """Poll /latest every 10s (configurable down to 5s), recompute, run Offer Coach & Alerts, push WS tick."""
+        interval = max(5, self.settings.latest_poll_seconds)
         while not self._stop_event.is_set():
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
