@@ -19,6 +19,7 @@ import { BadgePill, STRATEGY_META } from '../components/BadgePill';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { MLSignalBadge } from '../components/MLSignalBadge';
 import { TradeCallCard } from '../components/TradeCallCard';
+import { VolumeIndicator } from '../components/VolumeIndicator';
 import type { StrategyMode, TradeCall, TradeCallsResponse } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
@@ -199,10 +200,10 @@ export function CommandCenter({
             <span>Action (Click Price to Copy)</span>
             <span className="text-right">Net Profit / ROI</span>
             <span className="flex items-center gap-1">
-              1h Buy / Sell Flow
+              Volume &amp; Flow
               <InfoTooltip
-                title="1h Buy vs. Sell Flow (OFI)"
-                text="Green = instant buys (players buying at high). Red = instant sells (players dumping into low). Balanced flow fills fastest; heavy green means rising demand."
+                title="Trading Activity & 1h Buy/Sell Flow"
+                text="4-bar signal meter grades how often the item trades (Very High / High / Moderate / Light) across both volume and GP turnover. Green = instant buys, Red = instant sells."
               />
             </span>
             <span className="flex items-center justify-end gap-1">
@@ -406,18 +407,29 @@ function TradeCallRow({
           </span>
         </div>
 
-        {/* 4. 1h Buy/Sell Volume Bar */}
+        {/* 4. Volume Signal Meter & 1h Buy/Sell Flow Bar */}
         <div className="font-mono-num">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-zinc-200 font-semibold">{call.vol_1h.toLocaleString()}/h</span>
-            <span>
+          <div className="flex items-center justify-between gap-2 text-[11px]">
+            <VolumeIndicator
+              vol5m={call.vol_5m}
+              vol1h={call.vol_1h}
+              vol24h={call.vol_24h}
+              unitPrice={call.buy_price}
+            />
+            <span className="text-zinc-200 font-semibold">
+              {formatGp(call.vol_1h, true)}/h
+              <span className="text-[10px] font-normal text-zinc-500"> · {formatGp(call.vol_24h, true)}/d</span>
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-rose-500/50">
+              <div className="h-full bg-emerald-400" style={{ width: `${bPct}%` }} />
+            </div>
+            <span className="text-[10px] shrink-0">
               <span className="text-emerald-400">{bPct}%B</span>
               <span className="text-zinc-700">/</span>
               <span className="text-rose-400">{100 - bPct}%S</span>
             </span>
-          </div>
-          <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-rose-500/50">
-            <div className="h-full bg-emerald-400" style={{ width: `${bPct}%` }} />
           </div>
         </div>
 

@@ -18,6 +18,7 @@ import { api } from '../api/client';
 import { BadgePill, OVERNIGHT_RISK_META } from '../components/BadgePill';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { MLSignalBadge } from '../components/MLSignalBadge';
+import { VolumeIndicator } from '../components/VolumeIndicator';
 import type { OvernightFlip, OvernightResponse, OvernightStyle } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
@@ -224,10 +225,10 @@ export function Overnight({
               />
             </span>
             <span className="flex items-center justify-end gap-1">
-              8h Fill & Drift
+              Volume &amp; Fill
               <InfoTooltip
-                title="8h Fill Odds & 7d Drift"
-                text="Compares typical 8-hour volume against your quantity. Drift shows the 7-day trend % (steady near 0% is safest while sleeping)."
+                title="Trading Volume, Fill Odds & 7d Drift"
+                text="4-bar meter grades how frequently the item trades (24h volume & GP turnover), alongside 8h fill odds and 7d price drift."
                 align="right"
               />
             </span>
@@ -395,22 +396,34 @@ function OvernightRow({
           </div>
         </div>
 
-        <div className="flex items-center justify-between lg:flex-col lg:items-end text-xs font-mono-num">
-          <span
-            className={`font-bold ${
-              flip.fill_confidence === 'HIGH'
-                ? 'text-emerald-400'
-                : flip.fill_confidence === 'MEDIUM'
-                  ? 'text-amber-300'
-                  : 'text-zinc-400'
-            }`}
-          >
-            {flip.fill_confidence} FILL
-          </span>
-          <span className="text-[11px] text-zinc-400">
-            7d {flip.trend_7d_pct >= 0 ? '+' : ''}
-            {flip.trend_7d_pct.toFixed(1)}%
-          </span>
+        <div className="flex items-center justify-between lg:flex-col lg:items-end gap-1 text-xs font-mono-num">
+          <div className="flex items-center gap-2">
+            <VolumeIndicator
+              vol1h={flip.vol_1h}
+              vol24h={flip.vol_24h}
+              unitPrice={flip.buy_price}
+              compact
+            />
+            <span className="text-[10px] text-zinc-500">/d</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span
+              className={`font-bold ${
+                flip.fill_confidence === 'HIGH'
+                  ? 'text-emerald-400'
+                  : flip.fill_confidence === 'MEDIUM'
+                    ? 'text-amber-300'
+                    : 'text-zinc-400'
+              }`}
+            >
+              {flip.fill_confidence}
+            </span>
+            <span className="text-zinc-600">·</span>
+            <span className="text-zinc-400">
+              7d {flip.trend_7d_pct >= 0 ? '+' : ''}
+              {flip.trend_7d_pct.toFixed(1)}%
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-1.5 lg:w-[166px]">
@@ -546,7 +559,15 @@ function OvernightCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3">
-        <span className="text-[11px] text-zinc-500 font-mono-num">{formatGp(flip.capital_required, true)}</span>
+        <div className="flex items-center gap-2">
+          <VolumeIndicator
+            vol1h={flip.vol_1h}
+            vol24h={flip.vol_24h}
+            unitPrice={flip.buy_price}
+            compact
+          />
+          <span className="text-[10px] text-zinc-600">/d · {formatGp(flip.capital_required, true)}</span>
+        </div>
         <div className="flex gap-1.5">
           <button onClick={() => onOpenChart(flip.item_id)} className="rounded-lg border border-white/[0.08] bg-zinc-900 p-1.5 text-zinc-300">
             <BarChart3 className="h-3.5 w-3.5" />

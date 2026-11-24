@@ -15,6 +15,7 @@ import type { TradeCall } from '../types';
 import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 import { BadgePill, STRATEGY_META } from './BadgePill';
 import { MLSignalBadge } from './MLSignalBadge';
+import { VolumeIndicator } from './VolumeIndicator';
 
 interface Props {
   call: TradeCall;
@@ -215,26 +216,19 @@ export function TradeCallCard({ call, rank, isWatched, onToggleWatch, onOpenChar
           </div>
         </div>
 
-        {/* 1h Buy vs. Sell Volume Strip */}
+        {/* 1h Buy vs. Sell Volume Strip + Activity Signal */}
         <div className="mt-2.5 rounded-lg border border-white/[0.04] bg-[#08080b] px-2.5 py-2 text-[11px] tabular-nums">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
+            <VolumeIndicator
+              vol5m={call.vol_5m}
+              vol1h={call.vol_1h}
+              vol24h={call.vol_24h}
+              unitPrice={call.buy_price}
+            />
             <span className="text-zinc-400">
-              1h Vol <strong className="text-zinc-100">{call.vol_1h.toLocaleString()}</strong>
-              <span className="text-zinc-600"> · 24h {formatGp(call.vol_24h, true)}</span>
+              <strong className="text-zinc-100">{formatGp(call.vol_1h, true)}/h</strong>
+              <span className="text-zinc-600"> · {formatGp(call.vol_24h, true)}/d</span>
             </span>
-            {(() => {
-              const b = call.vol_1h_high ?? 0;
-              const s = call.vol_1h_low ?? 0;
-              const tot = b + s;
-              const bPct = tot > 0 ? Math.round((b / tot) * 100) : 50;
-              return (
-                <span>
-                  <span className="text-emerald-400 font-semibold">{bPct}% B</span>
-                  <span className="text-zinc-600"> / </span>
-                  <span className="text-rose-400 font-semibold">{100 - bPct}% S</span>
-                </span>
-              );
-            })()}
           </div>
           {(() => {
             const b = call.vol_1h_high ?? 0;
@@ -242,8 +236,15 @@ export function TradeCallCard({ call, rank, isWatched, onToggleWatch, onOpenChar
             const tot = b + s;
             const bPct = tot > 0 ? Math.round((b / tot) * 100) : 50;
             return (
-              <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-rose-500/55">
-                <div className="h-full bg-emerald-400" style={{ width: `${bPct}%` }} />
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-rose-500/55">
+                  <div className="h-full bg-emerald-400" style={{ width: `${bPct}%` }} />
+                </div>
+                <span className="text-[10px]">
+                  <span className="text-emerald-400 font-semibold">{bPct}%B</span>
+                  <span className="text-zinc-600">/</span>
+                  <span className="text-rose-400 font-semibold">{100 - bPct}%S</span>
+                </span>
               </div>
             );
           })()}

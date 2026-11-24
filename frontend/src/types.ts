@@ -52,6 +52,7 @@ export interface TradeCall {
   ofi_1h: number;
   zscore_24h?: number;
   zscore_7d: number;
+  vol_5m?: number;
   vol_1h: number;
   vol_1h_high?: number;
   vol_1h_low?: number;
@@ -449,6 +450,7 @@ export interface OvernightFlip {
   est_net_profit: number;
   net_roi_pct: number;
   est_8h_volume: number;
+  vol_1h?: number;
   vol_24h: number;
   vol_24h_high: number;
   vol_24h_low: number;
