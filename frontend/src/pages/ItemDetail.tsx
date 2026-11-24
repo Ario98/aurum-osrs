@@ -10,17 +10,14 @@ import {
 import {
   AlertTriangle,
   ArrowLeft,
-  BookOpen,
   Brain,
   Check,
-  Clock,
   Copy,
   Flame,
   Info,
   Maximize2,
   Minimize2,
   Moon,
-  Play,
   RefreshCw,
   Star,
   TrendingUp,
@@ -29,29 +26,18 @@ import {
 import { api } from '../api/client';
 import { InfoTooltip } from '../components/InfoTooltip';
 import { getAiVerdict } from '../components/MLSignalBadge';
-import type { ActiveSlot, BuyLimitRecord, ChartPoint, FlipRecord, ItemMetrics } from '../types';
+import type { ChartPoint, ItemMetrics } from '../types';
 import { formatAge, formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
 interface Props {
   itemId: number;
   backLabel: string;
   cashStack: number;
-  freeSlots: number;
-  slotsFull: boolean;
-  activeSlots: ActiveSlot[];
+  maxSlots: number;
   isStarred: boolean;
   tickVersion: number;
-  slotsVersion: number;
   onBack: () => void;
-  onToggleStar: (item: ItemMetrics) => Promise<void>;
-  onStartCustomFlip: (params: {
-    item_id: number;
-    item_name: string;
-    quantity: number;
-    buy_price: number;
-    target_sell_price: number;
-    flip_mode: 'active' | 'overnight';
-  }) => Promise<void>;
+  onToggleStar: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
 }
 
 type ChartWindow = '6h' | '24h' | '7d' | '30d' | '90d' | '1y';
@@ -84,27 +70,15 @@ function formatAxisGp(val: number): string {
   return `${(val / 1_000_000_000).toFixed(2)}B`;
 }
 
-function formatResetCountdown(resetAt: number): string {
-  const sec = Math.max(0, resetAt - Math.floor(Date.now() / 1000));
-  const hrs = Math.floor(sec / 3600);
-  const mins = Math.floor((sec % 3600) / 60);
-  if (hrs > 0) return `${hrs}h ${mins}m`;
-  return `${mins}m`;
-}
-
 export function ItemDetail({
   itemId,
   backLabel,
   cashStack,
-  freeSlots,
-  slotsFull,
-  activeSlots,
+  maxSlots,
   isStarred,
   tickVersion,
-  slotsVersion,
   onBack,
   onToggleStar,
-  onStartCustomFlip,
 }: Props) {
   const [item, setItem] = useState<ItemMetrics | null>(null);
   const [loadingItem, setLoadingItem] = useState(true);
@@ -120,17 +94,12 @@ export function ItemDetail({
   const [chartExpanded, setChartExpanded] = useState(false);
   const [hoverPoint, setHoverPoint] = useState<ChartPoint | null>(null);
 
-  // Interactive Order Ticket state (preserved across 10s live ticks)
+  // Read-only Tax & Profit Calculator state (preserved across 10s live ticks)
   const [buyInput, setBuyInput] = useState<number>(0);
   const [sellInput, setSellInput] = useState<number>(0);
   const [qtyInput, setQtyInput] = useState<number>(1);
   const [flipMode, setFlipMode] = useState<'active' | 'overnight'>('active');
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  // Personal item context (Journal flips + 4h buy limit)
-  const [itemHistory, setItemHistory] = useState<FlipRecord[]>([]);
-  const [itemLimit, setItemLimit] = useState<BuyLimitRecord | null>(null);
 
   const initializedItemRef = useRef<number | null>(null);
   const chartFrameRef = useRef<HTMLDivElement | null>(null);
@@ -141,15 +110,10 @@ export function ItemDetail({
   const sellLineRef = useRef<IPriceLine | null>(null);
   const [chartMountVersion, setChartMountVersion] = useState(0);
 
-  const activeSlot = useMemo(
-    () => activeSlots.find((s) => s.item_id === itemId) || null,
-    [activeSlots, itemId],
-  );
-
   const slotBudget = useMemo(() => {
-    const denom = Math.max(1, Math.min(freeSlots || 1, 8));
+    const denom = Math.max(1, Math.min(maxSlots || 1, 8));
     return Math.floor(cashStack / denom);
-  }, [cashStack, freeSlots]);
+  }, [cashStack, maxSlots]);
 
   // Escape navigates back when not typing inside an input
   useEffect(() => {
@@ -218,22 +182,6 @@ export function ItemDetail({
       cancelled = true;
     };
   }, [itemId, chartWindow, chartReloadNonce]);
-
-  // Fetch personal Journal history & 4h buy limit for this item
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .journal(200)
-      .then((res) => {
-        if (cancelled) return;
-        setItemHistory(res.history.filter((h) => h.item_id === itemId));
-        setItemLimit(res.buy_limits.find((b) => b.item_id === itemId) || null);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [itemId, slotsVersion]);
 
   // Synchronized Two-Pane TradingView Chart
   useEffect(() => {
@@ -537,16 +485,6 @@ export function ItemDetail({
   const limitTurnover1h =
     item && item.buy_limit > 0 && item.vol_1h > 0 ? (item.vol_1h / item.buy_limit).toFixed(1) : null;
 
-  const remainingBuyLimit =
-    item && item.buy_limit > 0
-      ? Math.max(0, item.buy_limit - (itemLimit?.quantity_bought || 0))
-      : null;
-
-  const itemTotalProfit = useMemo(
-    () => itemHistory.reduce((acc, h) => acc + h.net_profit, 0),
-    [itemHistory],
-  );
-
   const bounceBadgeCls =
     item?.dump_bounce_outlook === 'HIGH'
       ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-300'
@@ -556,15 +494,8 @@ export function ItemDetail({
           ? 'border-rose-500/35 bg-rose-500/15 text-rose-300'
           : 'border-white/10 bg-zinc-900 text-zinc-400';
 
-  const loadPresetPrices = (preset: 'front' | 'overnight' | 'slot') => {
+  const loadPresetPrices = (preset: 'front' | 'overnight') => {
     if (!item) return;
-    if (preset === 'slot' && activeSlot) {
-      setBuyInput(activeSlot.buy_price);
-      setSellInput(activeSlot.target_sell_price);
-      setQtyInput(activeSlot.quantity);
-      setFlipMode(activeSlot.flip_mode);
-      return;
-    }
     if (preset === 'overnight') {
       const refP25 = item.p25_48h || item.p25_7d || item.low || 1;
       const refP75 = item.p75_48h || item.p75_7d || item.high || 1;
@@ -634,14 +565,6 @@ export function ItemDetail({
                   {item?.buy_limit ? item.buy_limit.toLocaleString() : '—'}
                 </strong>
               </span>
-              {remainingBuyLimit !== null && itemLimit && (
-                <>
-                  <span>·</span>
-                  <span className="text-amber-300 font-medium">
-                    {remainingBuyLimit.toLocaleString()} left (resets in {formatResetCountdown(itemLimit.window_reset_at)})
-                  </span>
-                </>
-              )}
               {limitTurnover1h && (
                 <>
                   <span>·</span>
@@ -709,37 +632,6 @@ export function ItemDetail({
           </button>
         </div>
       </div>
-
-      {/* Active GE Slot Live Banner (when you currently hold this item in a slot) */}
-      {activeSlot && (
-        <div
-          className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-2.5 text-xs ${
-            activeSlot.coach_severity === 'danger'
-              ? 'border-rose-500/35 bg-rose-500/10 text-rose-200'
-              : activeSlot.coach_severity === 'warning'
-                ? 'border-amber-500/35 bg-amber-500/10 text-amber-200'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="rounded-md bg-black/35 px-2 py-0.5 font-mono-num text-[11px] font-bold">
-              Slot {activeSlot.slot_number} · {activeSlot.status}
-            </span>
-            <span className="font-mono-num">
-              {activeSlot.quantity.toLocaleString()}× @ {formatGp(activeSlot.buy_price)} → {formatGp(activeSlot.target_sell_price)}
-            </span>
-            <span className="text-white/40">·</span>
-            <span className="font-medium">{activeSlot.coach_message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => loadPresetPrices('slot')}
-            className="rounded-lg border border-white/15 bg-black/30 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-black/50 transition"
-          >
-            Load into Ticket
-          </button>
-        </div>
-      )}
 
       {/* 2. MAIN TRADINGVIEW TERMINAL SPLIT */}
       <div
@@ -1045,103 +937,16 @@ export function ItemDetail({
               </div>
             </div>
           )}
-
-          {/* Personal History & 4h Buy Limit Card (shown when you have activity on this item) */}
-          {(itemLimit || itemHistory.length > 0) && (
-            <div className="rounded-2xl border border-white/[0.08] bg-[#0c0c10] p-4 space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex items-center gap-2 text-xs font-bold text-zinc-100">
-                  <BookOpen className="h-3.5 w-3.5 text-amber-400" />
-                  Your Activity on {item?.name || `Item #${itemId}`}
-                </span>
-                {itemHistory.length > 0 && (
-                  <span className="text-xs font-mono-num">
-                    <span className="text-zinc-500">{itemHistory.length} flips · Net </span>
-                    <strong className={itemTotalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {formatSignedGp(itemTotalProfit, true)} gp
-                    </strong>
-                  </span>
-                )}
-              </div>
-
-              {itemLimit && item && item.buy_limit > 0 && (
-                <div className="rounded-xl border border-white/[0.06] bg-[#070709] p-3 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5 text-zinc-300 font-medium">
-                      <Clock className="h-3.5 w-3.5 text-amber-400" />
-                      4-Hour GE Buy Limit Usage
-                    </span>
-                    <span className="font-mono-num text-zinc-300">
-                      {itemLimit.quantity_bought.toLocaleString()} / {item.buy_limit.toLocaleString()} used · resets in{' '}
-                      <strong className="text-amber-300">{formatResetCountdown(itemLimit.window_reset_at)}</strong>
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-900">
-                    <div
-                      className="h-full rounded-full bg-amber-400 transition-all"
-                      style={{
-                        width: `${Math.min(100, Math.round((itemLimit.quantity_bought / item.buy_limit) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {itemHistory.length > 0 && (
-                <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-[#070709]">
-                  <table className="w-full text-left text-xs font-mono-num">
-                    <thead className="border-b border-white/[0.06] font-sans text-[10px] uppercase tracking-wider text-zinc-500">
-                      <tr>
-                        <th className="px-3 py-2 font-semibold">Closed</th>
-                        <th className="px-3 py-2 font-semibold text-right">Qty</th>
-                        <th className="px-3 py-2 font-semibold text-right">Buy → Sell</th>
-                        <th className="px-3 py-2 font-semibold text-right">Tax</th>
-                        <th className="px-3 py-2 font-semibold text-right">Net Profit</th>
-                        <th className="px-3 py-2 font-semibold text-right">ROI</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.04] text-zinc-300">
-                      {itemHistory.slice(0, 8).map((h) => (
-                        <tr key={h.id}>
-                          <td className="px-3 py-2 font-sans text-[11px] text-zinc-400">
-                            {new Date(h.closed_at * 1000).toLocaleString([], {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </td>
-                          <td className="px-3 py-2 text-right">{h.quantity.toLocaleString()}</td>
-                          <td className="px-3 py-2 text-right">
-                            {formatGp(h.buy_price)} → {formatGp(h.sell_price)}
-                          </td>
-                          <td className="px-3 py-2 text-right text-zinc-500">{formatGp(h.tax_paid, true)}</td>
-                          <td
-                            className={`px-3 py-2 text-right font-semibold ${
-                              h.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                            }`}
-                          >
-                            {formatSignedGp(h.net_profit, true)}
-                          </td>
-                          <td className="px-3 py-2 text-right text-zinc-400">{h.roi_pct.toFixed(2)}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* RIGHT STICKY RAIL: ORDER TICKET + AI DUAL-HORIZON FORECAST */}
+        {/* RIGHT STICKY RAIL: READ-ONLY TAX & PROFIT CALCULATOR + AI FORECAST */}
         {!chartExpanded && (
           <div className="space-y-4 xl:sticky xl:top-[68px]">
-            {/* Order Ticket & Flip Calculator */}
+            {/* Tax & Profit Calculator */}
             <div className="rounded-2xl border border-white/[0.09] bg-[#0c0c10] p-4 space-y-4">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-100">
-                  <TrendingUp className="h-4 w-4 text-emerald-400" /> Order Ticket
+                  <TrendingUp className="h-4 w-4 text-emerald-400" /> Tax &amp; Profit Calculator
                 </h2>
                 <span className="text-[11px] text-zinc-500 font-mono-num">
                   Budget: <strong className="text-zinc-200">{formatGp(slotBudget, true)}</strong>
@@ -1292,7 +1097,7 @@ export function ItemDetail({
                     type="button"
                     onClick={() => {
                       const maxByBudget = Math.max(1, Math.floor(slotBudget / safeBuy));
-                      const lim = remainingBuyLimit ?? (item?.buy_limit || maxByBudget);
+                      const lim = item?.buy_limit || maxByBudget;
                       setQtyInput(Math.max(1, Math.min(maxByBudget, lim)));
                     }}
                     className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-zinc-400 hover:text-white"
@@ -1302,12 +1107,10 @@ export function ItemDetail({
                   {item && item.buy_limit > 0 && (
                     <button
                       type="button"
-                      onClick={() => setQtyInput(remainingBuyLimit !== null && remainingBuyLimit > 0 ? remainingBuyLimit : item.buy_limit)}
+                      onClick={() => setQtyInput(item.buy_limit)}
                       className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-zinc-400 hover:text-white"
                     >
-                      {remainingBuyLimit !== null && remainingBuyLimit < item.buy_limit
-                        ? `Rem. Limit (${remainingBuyLimit.toLocaleString()})`
-                        : `Full Limit (${item.buy_limit.toLocaleString()})`}
+                      4h Limit ({item.buy_limit.toLocaleString()})
                     </button>
                   )}
                 </div>
@@ -1341,34 +1144,18 @@ export function ItemDetail({
                 </div>
               </div>
 
-              {/* Primary CTA */}
               <button
                 type="button"
-                disabled={!item || slotsFull || submitting}
-                onClick={async () => {
-                  if (!item) return;
-                  setSubmitting(true);
-                  try {
-                    await onStartCustomFlip({
-                      item_id: item.id,
-                      item_name: item.name,
-                      quantity: safeQty,
-                      buy_price: safeBuy,
-                      target_sell_price: safeSell,
-                      flip_mode: flipMode,
-                    });
-                  } finally {
-                    setSubmitting(false);
-                  }
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-300 to-amber-400 py-2.5 text-xs font-bold text-zinc-950 transition hover:from-amber-200 hover:to-amber-300 disabled:opacity-40"
+                disabled={!item}
+                onClick={() => item && onToggleStar({ id: item.id, name: item.name, low: item.low })}
+                className={`flex w-full items-center justify-center gap-2 rounded-xl border py-2.5 text-xs font-bold transition disabled:opacity-40 ${
+                  isStarred
+                    ? 'border-amber-500/45 bg-amber-500/15 text-amber-200 hover:bg-amber-500/20'
+                    : 'border-amber-400/35 bg-gradient-to-r from-amber-300 to-amber-400 text-zinc-950 hover:from-amber-200 hover:to-amber-300'
+                }`}
               >
-                <Play className="h-3.5 w-3.5 fill-current" />
-                {slotsFull
-                  ? 'All GE Slots Full'
-                  : submitting
-                    ? 'Adding to GE Slot...'
-                    : `Start ${flipMode === 'overnight' ? 'Overnight' : 'Active'} Flip`}
+                <Star className={`h-3.5 w-3.5 ${isStarred ? 'fill-current' : ''}`} />
+                {isStarred ? 'Pinned in Top Watch Bar' : 'Pin to Top Watch Bar'}
               </button>
             </div>
 

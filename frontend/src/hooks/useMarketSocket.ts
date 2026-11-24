@@ -3,7 +3,6 @@ import type { AlertItem } from '../types';
 
 interface SocketEvents {
   onMarketTick: () => void;
-  onSlotsUpdated: () => void;
   onAlert: (alert: AlertItem) => void;
   onBootstrapUpdate: () => void;
 }
@@ -40,8 +39,6 @@ export function useMarketSocket(enabled: boolean, events: SocketEvents) {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'market_tick') {
             eventsRef.current.onMarketTick();
-          } else if (msg.type === 'slots_updated') {
-            eventsRef.current.onSlotsUpdated();
           } else if (msg.type === 'alert' && msg.alert) {
             eventsRef.current.onAlert(msg.alert as AlertItem);
           } else if (msg.type === 'bootstrap_ready' || msg.type === 'enrichment_complete') {

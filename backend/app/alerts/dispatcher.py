@@ -11,7 +11,6 @@ import httpx
 from app.config import Settings
 from app.db.repository import Repository
 from app.engine.arbitrage import scan_item_sets, scan_potion_decanting
-from app.engine.coach import evaluate_slot
 from app.engine.state import MarketState
 
 logger = logging.getLogger(__name__)
@@ -146,7 +145,7 @@ class AlertDispatcher:
         return record
 
     async def scan_and_dispatch(self, state: MarketState) -> None:
-        """Run on every live /latest tick: check Offer Coach, Dump Snipes, and Instant Arbitrage."""
+        """Run on every live /latest tick: check Watchlist targets, Dump Snipes, and Instant Arbitrage."""
         user_cfg = await self.repo.get_all_settings()
         alerts_enabled = user_cfg.get("alerts_enabled", True)
         if not alerts_enabled:
@@ -155,35 +154,10 @@ class AlertDispatcher:
         members = bool(user_cfg.get("members", self.settings.default_members))
         discord_dumps = bool(user_cfg.get("discord_dump_alerts", True))
         discord_arb = bool(user_cfg.get("discord_arb_alerts", True))
-        discord_coach = bool(user_cfg.get("discord_coach_alerts", True))
         min_dump_score = float(user_cfg.get("alert_min_dump_score", 72))
         min_arb_profit = int(user_cfg.get("alert_min_arb_profit", 75_000))
 
-        # 1. Proactive Offer Coach checks on active GE slots
-        active_slots = await self.repo.get_active_slots()
-        for slot in active_slots:
-            evaluated = evaluate_slot(slot, state)
-            action = evaluated["coach_action"]
-            if action in ("BAILOUT_WARNING", "RELIST_BUY", "RELIST_SELL", "CANCEL"):
-                sev = "danger" if action in ("BAILOUT_WARNING", "CANCEL") else "warning"
-                cooldown = 300 if sev == "danger" else 600
-                await self.emit(
-                    alert_type=f"COACH_{action}",
-                    dedupe_key=f"slot_{slot['slot_number']}_{slot['item_id']}_{action}",
-                    title=f"Slot {slot['slot_number']} Coach: {action.replace('_', ' ').title()} — {slot['item_name']}",
-                    message=evaluated["coach_message"],
-                    severity=sev,
-                    item_id=slot["item_id"],
-                    item_name=slot["item_name"],
-                    metadata={
-                        "slot_number": slot["slot_number"],
-                        "recommended_price": evaluated["recommended_price"],
-                    },
-                    cooldown_sec=cooldown,
-                    send_to_discord=discord_coach,
-                )
-
-        # 1b. Personal Watchlist Custom Price & Margin Targets
+        # 1. Personal Watchlist Custom Price & Margin Targets
         watch_items = await self.repo.get_watchlist()
         for w in watch_items:
             m = state.metrics.get(int(w["item_id"]))

@@ -324,9 +324,6 @@ async def get_system_health(
             "backup": backup,
         },
         "integrations": {
-            "dink_configured": bool(settings.dink_webhook_token),
-            "last_dink_ts": db_stats["last_dink_ts"],
-            "dink_events_total": db_stats["dink_events_total"],
             "discord_configured": discord_configured,
             "last_discord_sent_ts": alerts.last_discord_sent_ts,
             "last_discord_ok": alerts.last_discord_ok,
@@ -336,8 +333,6 @@ async def get_system_health(
             "alerts_24h_total": db_stats["alerts_24h_total"],
             "alerts_24h_by_type": db_stats["alerts_24h_by_type"],
             "watchlist_count": db_stats["watchlist_count"],
-            "active_slots_count": db_stats["active_slots_count"],
-            "journal_flips_count": db_stats["journal_flips_count"],
         },
     }
 

@@ -243,28 +243,26 @@ export function HelpModal({ open, onClose }: Props) {
                   </p>
                 </div>
                 <div className="rounded-xl border border-white/[0.08] bg-[#0e0e13] p-4 space-y-1.5">
-                  <div className="font-bold text-zinc-100">2. Pick Flips & Track Slots</div>
+                  <div className="font-bold text-zinc-100">2. Pin Live Tabs with ★ Watch</div>
                   <p className="text-zinc-400">
-                    Use <strong className="text-zinc-200">Trade Calls</strong> while playing and{' '}
-                    <strong className="text-zinc-200">Overnight</strong> before bed. Click{' '}
-                    <strong className="text-zinc-200">Start Flip</strong> or{' '}
-                    <strong className="text-zinc-200">Start Night</strong> to log the offer into your top 8-slot ribbon
-                    (it tracks your offers — it never auto-clicks in RuneScape).
+                    Click <strong className="text-amber-300">★ Watch</strong> on any item you're flipping or monitoring.
+                    It pins straight to the top Watch bar with live Bid/Ask, net margin, and 1h trend (▲/▼) so you can
+                    jump back to its full chart in one click.
                   </p>
                 </div>
                 <div className="rounded-xl border border-white/[0.08] bg-[#0e0e13] p-4 space-y-1.5">
-                  <div className="font-bold text-zinc-100">3. Connect RuneLite Dink (Optional)</div>
+                  <div className="font-bold text-zinc-100">3. Full-Page Charts &amp; Tax Calculator</div>
                   <p className="text-zinc-400">
-                    Paste your private webhook URL from <strong className="text-zinc-200">Settings</strong> into the
-                    RuneLite <strong className="text-zinc-200">Dink</strong> plugin so GE buys & sells automatically
-                    update your 8 slots, 4h buy limits, and realized post-tax profit journal.
+                    Click any item name or search inline from the top bar (<kbd className="font-mono text-zinc-200">Ctrl K</kbd>)
+                    to open its dedicated TradingView-style page with live Buy/Sell order lines, 2% GE tax math, and 1-click price copy.
                   </p>
                 </div>
                 <div className="rounded-xl border border-white/[0.08] bg-[#0e0e13] p-4 space-y-1.5">
-                  <div className="font-bold text-zinc-100">4. Use Watchlist & Proactive Coach</div>
+                  <div className="font-bold text-zinc-100">4. Live Alerts &amp; Discord Pings</div>
                   <p className="text-zinc-400">
-                    Star favorite items to get Discord alerts when prices hit your custom targets. Your top slot ribbon
-                    warns you if you get outbid (Active flips) while staying calm on Overnight bids.
+                    Set custom price or margin targets on the <strong className="text-zinc-200">Watchlist</strong> page
+                    or configure a Discord webhook in <strong className="text-zinc-200">Settings</strong> for Dump Snipe
+                    and Instant Arbitrage alerts.
                   </p>
                 </div>
               </div>

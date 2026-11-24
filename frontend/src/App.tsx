@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   Bell,
-  BookOpen,
   ChevronDown,
   Coins,
   FlaskConical,
@@ -27,32 +26,28 @@ import {
   BRAND_SIGNATURE,
   BRAND_SUBTITLE,
 } from './components/AurumLogo';
-import { CommandPalette } from './components/CommandPalette';
+import { HeaderSearch } from './components/HeaderSearch';
 import { HelpModal } from './components/HelpModal';
-import { SlotRibbon } from './components/SlotRibbon';
+import { WatchRibbon } from './components/WatchRibbon';
 import { useMarketSocket } from './hooks/useMarketSocket';
 import { Arbitrage } from './pages/Arbitrage';
 import { CommandCenter } from './pages/CommandCenter';
 import { ItemDetail } from './pages/ItemDetail';
-import { Journal } from './pages/Journal';
 import { Overnight } from './pages/Overnight';
 import { Scanner } from './pages/Scanner';
 import { Settings, type SettingsSubTab } from './pages/Settings';
 import { Watchlist } from './pages/Watchlist';
 import type {
-  ActiveSlot,
   AlertItem,
-  ItemMetrics,
   MarketStatus,
-  OvernightFlip,
   StrategyMode,
-  TradeCall,
   TradeCallsResponse,
   UserSettings,
+  WatchlistItem,
 } from './types';
 import { formatGp, parseGpInput, playAlertChime } from './utils/format';
 
-type NavTab = 'command' | 'overnight' | 'watchlist' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
+type NavTab = 'command' | 'overnight' | 'watchlist' | 'scanner' | 'arbitrage' | 'settings';
 
 const TAB_LABELS: Record<NavTab, string> = {
   command: 'Trade Calls',
@@ -60,7 +55,6 @@ const TAB_LABELS: Record<NavTab, string> = {
   watchlist: 'Watchlist',
   scanner: 'Scanner',
   arbitrage: 'Arbitrage',
-  journal: 'Journal',
   settings: 'Settings',
 };
 
@@ -103,16 +97,14 @@ export default function App() {
 
   const [tradeData, setTradeData] = useState<TradeCallsResponse | null>(null);
   const [loadingTrades, setLoadingTrades] = useState(false);
-  const [slots, setSlots] = useState<ActiveSlot[]>([]);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [toasts, setToasts] = useState<AlertItem[]>([]);
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(() => parseItemIdFromPath());
 
   const [tickVersion, setTickVersion] = useState(0);
-  const [slotsVersion, setSlotsVersion] = useState(0);
   const [watchlistVersion, setWatchlistVersion] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
 
@@ -146,18 +138,6 @@ export default function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  // Global Ctrl+K / Cmd+K shortcut
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setPaletteOpen((open) => !open);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // Close bank popover on outside click
@@ -194,16 +174,6 @@ export default function App() {
     }
   }, []);
 
-  const refreshSlots = useCallback(async () => {
-    try {
-      const res = await api.slots();
-      setSlots(res.slots);
-      setSlotsVersion((v) => v + 1);
-    } catch {
-      // ignore
-    }
-  }, []);
-
   const refreshTradeCalls = useCallback(async () => {
     setLoadingTrades(true);
     try {
@@ -225,9 +195,10 @@ export default function App() {
     }
   }, []);
 
-  const refreshWatchlistIds = useCallback(async () => {
+  const refreshWatchlist = useCallback(async () => {
     try {
       const res = await api.watchlist();
+      setWatchlistItems(res.items);
       setStarredIds(new Set(res.items.map((w) => w.item_id)));
       setWatchlistVersion((v) => v + 1);
     } catch {
@@ -244,10 +215,9 @@ export default function App() {
       setSoundEnabled(s.sound_enabled);
     });
     refreshStatus();
-    refreshSlots();
     refreshAlerts();
-    refreshWatchlistIds();
-  }, [authenticated, refreshStatus, refreshSlots, refreshAlerts, refreshWatchlistIds]);
+    refreshWatchlist();
+  }, [authenticated, refreshStatus, refreshAlerts, refreshWatchlist]);
 
   useEffect(() => {
     if (!authenticated || status?.ready) return;
@@ -258,19 +228,17 @@ export default function App() {
   useEffect(() => {
     if (!authenticated) return;
     refreshTradeCalls();
-  }, [authenticated, refreshTradeCalls, tickVersion, slotsVersion]);
+  }, [authenticated, refreshTradeCalls, tickVersion]);
 
   const { connected } = useMarketSocket(authenticated, {
     onMarketTick: () => {
       setTickVersion((v) => v + 1);
       refreshStatus();
-      refreshSlots();
-    },
-    onSlotsUpdated: () => {
-      refreshSlots();
+      refreshWatchlist();
     },
     onBootstrapUpdate: () => {
       refreshStatus();
+      refreshWatchlist();
       setTickVersion((v) => v + 1);
     },
     onAlert: (alert) => {
@@ -312,48 +280,7 @@ export default function App() {
     }
   };
 
-  const handleStartFlip = async (call: TradeCall) => {
-    await api.startSlot({
-      item_id: call.item_id,
-      item_name: call.item_name,
-      status: 'BUYING',
-      quantity: call.quantity,
-      buy_price: call.buy_price,
-      target_sell_price: call.sell_price,
-      flip_mode: call.strategy === 'overnight' ? 'overnight' : 'active',
-    });
-    await refreshSlots();
-  };
-
-  const handleStartCustomFlip = async (params: {
-    item_id: number;
-    item_name: string;
-    quantity: number;
-    buy_price: number;
-    target_sell_price: number;
-    flip_mode: 'active' | 'overnight';
-  }) => {
-    await api.startSlot({
-      ...params,
-      status: 'BUYING',
-    });
-    await refreshSlots();
-  };
-
-  const handleStartOvernightFlip = async (flip: OvernightFlip) => {
-    await api.startSlot({
-      item_id: flip.item_id,
-      item_name: flip.item_name,
-      status: 'BUYING',
-      quantity: flip.quantity,
-      buy_price: flip.buy_price,
-      target_sell_price: flip.sell_price,
-      flip_mode: 'overnight',
-    });
-    await refreshSlots();
-  };
-
-  const handleToggleStar = async (item: ItemMetrics) => {
+  const handleToggleWatch = async (item: { id: number; name: string; low?: number | null }) => {
     if (starredIds.has(item.id)) {
       await api.deleteWatchlist(item.id);
     } else {
@@ -364,7 +291,12 @@ export default function App() {
         discord_notify: true,
       });
     }
-    await refreshWatchlistIds();
+    await refreshWatchlist();
+  };
+
+  const handleRemoveWatch = async (itemId: number) => {
+    await api.deleteWatchlist(itemId);
+    await refreshWatchlist();
   };
 
   const handleSettingsSaved = (s: UserSettings) => {
@@ -435,7 +367,6 @@ export default function App() {
     { key: 'watchlist', label: 'Watchlist & Alerts', shortLabel: 'Watch', icon: <Star className="h-[18px] w-[18px]" /> },
     { key: 'scanner', label: 'Market Scanner', shortLabel: 'Scan', icon: <Search className="h-[18px] w-[18px]" /> },
     { key: 'arbitrage', label: 'Arbitrage', shortLabel: 'Arb', icon: <FlaskConical className="h-[18px] w-[18px]" /> },
-    { key: 'journal', label: 'Journal & Limits', shortLabel: 'Journal', icon: <BookOpen className="h-[18px] w-[18px]" /> },
     { key: 'settings', label: 'Settings & System', shortLabel: 'Settings', icon: <SettingsIcon className="h-[18px] w-[18px]" /> },
   ];
 
@@ -543,20 +474,12 @@ export default function App() {
                 </span>
               </button>
 
-              <button
-                onClick={() => setPaletteOpen(true)}
-                className="flex flex-1 max-w-md items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-[#0c0c10] px-3.5 py-2 text-xs text-zinc-400 hover:border-white/[0.16] hover:text-zinc-200 transition"
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <Search className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                  <span className="truncate">
-                    Search {status?.items_tracked ? status.items_tracked.toLocaleString() : '4,682'} OSRS items...
-                  </span>
-                </span>
-                <kbd className="hidden sm:inline-flex items-center rounded-md border border-white/[0.1] bg-black/50 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500">
-                  Ctrl K
-                </kbd>
-              </button>
+              <HeaderSearch
+                itemsTracked={status?.items_tracked || 0}
+                starredIds={starredIds}
+                onSelectItem={openItemPage}
+                onToggleWatch={handleToggleWatch}
+              />
             </div>
 
             {/* Right: Smart Health Pill, Cash Stack, Members Toggle, Alerts */}
@@ -710,23 +633,12 @@ export default function App() {
           </div>
         </header>
 
-        {/* Persistent Live GE Slot Ribbon (8 slots P2P, 3 slots F2P) */}
-        <SlotRibbon
-          slots={slots}
-          maxSlots={members ? 8 : 3}
-          onUpdateSlot={async (slotNum, updates) => {
-            await api.updateSlot(slotNum, updates);
-            await refreshSlots();
-          }}
-          onCompleteSlot={async (slotNum, sellPrice) => {
-            await api.completeSlot(slotNum, { sell_price: sellPrice });
-            await refreshSlots();
-          }}
-          onClearSlot={async (slotNum) => {
-            await api.deleteSlot(slotNum);
-            await refreshSlots();
-          }}
-          onOpenChart={openItemPage}
+        {/* Persistent Live Watch Ticker Bar (pinned via ★ Watch anywhere) */}
+        <WatchRibbon
+          items={watchlistItems}
+          activeItemId={selectedItemId}
+          onOpenItem={openItemPage}
+          onRemoveItem={handleRemoveWatch}
         />
 
         {/* Fast Bootstrap Banner */}
@@ -751,15 +663,11 @@ export default function App() {
               itemId={selectedItemId}
               backLabel={TAB_LABELS[activeTab]}
               cashStack={cashStack}
-              freeSlots={Math.max(1, (members ? 8 : 3) - slots.length)}
-              slotsFull={slots.length >= (members ? 8 : 3)}
-              activeSlots={slots}
+              maxSlots={members ? 8 : 3}
               isStarred={starredIds.has(selectedItemId)}
               tickVersion={tickVersion}
-              slotsVersion={slotsVersion}
               onBack={closeItemPage}
-              onToggleStar={handleToggleStar}
-              onStartCustomFlip={handleStartCustomFlip}
+              onToggleStar={handleToggleWatch}
             />
           ) : (
             <>
@@ -771,10 +679,10 @@ export default function App() {
                   mlBoost={mlBoost}
                   onToggleMlBoost={() => setMlBoost((b) => !b)}
                   tradeData={tradeData}
-                  slotsFull={slots.length >= (members ? 8 : 3)}
+                  starredIds={starredIds}
                   loading={loadingTrades}
                   onRefresh={refreshTradeCalls}
-                  onStartFlip={handleStartFlip}
+                  onToggleWatch={handleToggleWatch}
                   onOpenChart={openItemPage}
                   onOpenMlLab={() => {
                     navigateTab('settings');
@@ -789,10 +697,9 @@ export default function App() {
                   members={members}
                   mlBoost={mlBoost}
                   onToggleMlBoost={() => setMlBoost((b) => !b)}
-                  slotsFull={slots.length >= (members ? 8 : 3)}
+                  starredIds={starredIds}
                   tickVersion={tickVersion}
-                  slotsVersion={slotsVersion}
-                  onStartOvernight={handleStartOvernightFlip}
+                  onToggleWatch={handleToggleWatch}
                   onOpenChart={openItemPage}
                   onOpenMlLab={() => {
                     navigateTab('settings');
@@ -805,7 +712,7 @@ export default function App() {
                 <Watchlist
                   tickVersion={tickVersion}
                   watchlistVersion={watchlistVersion}
-                  onWatchlistChanged={refreshWatchlistIds}
+                  onWatchlistChanged={refreshWatchlist}
                   onOpenChart={openItemPage}
                 />
               )}
@@ -816,10 +723,6 @@ export default function App() {
 
               {activeTab === 'arbitrage' && (
                 <Arbitrage members={members} tickVersion={tickVersion} onOpenChart={openItemPage} />
-              )}
-
-              {activeTab === 'journal' && (
-                <Journal slotsVersion={slotsVersion} onOpenChart={openItemPage} />
               )}
 
               {activeTab === 'settings' && (
@@ -856,7 +759,7 @@ export default function App() {
       </div>
 
       {/* Mobile / iPhone Fixed Bottom Navigation Bar */}
-      <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-7 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
+      <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
         {navItems.map((n) => {
           const active = selectedItemId === null && activeTab === n.key;
           return (
@@ -876,11 +779,6 @@ export default function App() {
 
       {/* Modals & Overlays */}
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onSelectItem={openItemPage}
-      />
       <AlertDrawer
         open={alertDrawerOpen}
         alerts={alerts}

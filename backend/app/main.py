@@ -21,7 +21,7 @@ from app.engine.state import MarketState
 from app.ingestion.collector import CollectorService
 from app.ingestion.wiki_client import WikiApiClient
 from app.ml.predictor import MLPredictor
-from app.routers import arbitrage, market, ml as ml_router, settings as settings_router, slots, system, watchlist, webhooks
+from app.routers import arbitrage, market, ml as ml_router, settings as settings_router, system, watchlist
 
 
 class WebSocketHub:
@@ -141,11 +141,9 @@ def create_app() -> FastAPI:
 
     app.include_router(market.router)
     app.include_router(arbitrage.router)
-    app.include_router(slots.router)
     app.include_router(watchlist.router)
     app.include_router(ml_router.router)
     app.include_router(system.router)
-    app.include_router(webhooks.router)
     app.include_router(settings_router.router)
 
     # Serve compiled React SPA in production container if present

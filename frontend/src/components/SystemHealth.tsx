@@ -578,23 +578,6 @@ export function SystemHealth() {
           <div className="grid grid-cols-2 gap-2.5 text-xs">
             <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wider text-zinc-500">RuneLite Dink</span>
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    integrations.dink_configured ? 'bg-emerald-400' : 'bg-zinc-600'
-                  }`}
-                />
-              </div>
-              <div className="mt-1 font-semibold tabular-nums text-zinc-200">
-                {integrations.dink_events_total} GE events
-              </div>
-              <div className="mt-0.5 text-[11px] text-zinc-500">
-                Last: {formatAgeFromTs(integrations.last_dink_ts)}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
-              <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase tracking-wider text-zinc-500">Discord Webhook</span>
                 <span
                   className={`h-2 w-2 rounded-full ${
@@ -615,6 +598,16 @@ export function SystemHealth() {
                 {integrations.last_discord_error
                   ? `Err: ${integrations.last_discord_error}`
                   : `Last: ${formatAgeFromTs(integrations.last_discord_sent_ts)}`}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/[0.06] bg-[#060608] p-3">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Pinned Watchlist</div>
+              <div className="mt-1 font-semibold tabular-nums text-zinc-200">
+                {integrations.watchlist_count} watched {integrations.watchlist_count === 1 ? 'item' : 'items'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-500">
+                Synced live to top Watch bar
               </div>
             </div>
           </div>
@@ -639,22 +632,6 @@ export function SystemHealth() {
                 ))}
               </div>
             )}
-          </div>
-
-          {/* Live User Data Counters */}
-          <div className="grid grid-cols-3 gap-2 text-center text-xs">
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] py-2">
-              <div className="text-sm font-bold tabular-nums text-zinc-100">{integrations.active_slots_count}/8</div>
-              <div className="text-[10px] text-zinc-500">Active Slots</div>
-            </div>
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] py-2">
-              <div className="text-sm font-bold tabular-nums text-zinc-100">{integrations.watchlist_count}</div>
-              <div className="text-[10px] text-zinc-500">Watchlist</div>
-            </div>
-            <div className="rounded-xl border border-white/[0.06] bg-[#060608] py-2">
-              <div className="text-sm font-bold tabular-nums text-zinc-100">{integrations.journal_flips_count}</div>
-              <div className="text-[10px] text-zinc-500">Logged Flips</div>
-            </div>
           </div>
         </div>
       </div>

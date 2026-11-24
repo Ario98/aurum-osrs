@@ -1,3 +1,5 @@
+import type { Entitlements } from './config/features';
+
 export type StrategyMode = 'auto_mix' | 'fast_flip' | 'overnight' | 'dump_sniper' | 'alch_floor';
 export type OvernightStyle = 'balanced' | 'safe' | 'high_margin';
 export type ScannerPreset = 'all' | 'fast_flip' | 'overnight' | 'dump_sniper' | 'alch_floor' | 'tax_exempt' | 'mega_rares';
@@ -20,6 +22,7 @@ export interface MarketStatus {
   total_wiki_requests: number;
   health_status?: 'healthy' | 'degraded';
   health_issues?: string[];
+  entitlements?: Entitlements;
 }
 
 export interface TradeCall {
@@ -415,10 +418,8 @@ export interface UserSettings {
   sound_enabled: boolean;
   discord_dump_alerts: boolean;
   discord_arb_alerts: boolean;
-  discord_coach_alerts: boolean;
   alert_min_dump_score: number;
   alert_min_arb_profit: number;
-  dink_webhook_url: string;
   wiki_user_agent: string;
 }
 
@@ -496,10 +497,17 @@ export interface WatchlistItem {
   updated_at: number;
   high: number | null;
   low: number | null;
+  high_age_sec?: number | null;
+  low_age_sec?: number | null;
   net_margin: number;
   net_roi_pct: number;
   vol_1h: number;
   vol_24h: number;
+  price_change_1h_pct?: number;
+  price_change_24h_pct?: number;
+  trend_7d_pct?: number;
+  ofi_5m?: number;
+  ofi_1h?: number;
   zscore_7d: number;
   safety_score: number;
   is_tax_exempt: boolean;
@@ -586,9 +594,6 @@ export interface SystemHealthResponse {
     };
   };
   integrations: {
-    dink_configured: boolean;
-    last_dink_ts: number | null;
-    dink_events_total: number;
     discord_configured: boolean;
     last_discord_sent_ts: number | null;
     last_discord_ok: boolean | null;
@@ -598,8 +603,6 @@ export interface SystemHealthResponse {
     alerts_24h_total: number;
     alerts_24h_by_type: Record<string, number>;
     watchlist_count: number;
-    active_slots_count: number;
-    journal_flips_count: number;
   };
 }
 

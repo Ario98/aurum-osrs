@@ -1,10 +1,8 @@
 import type {
-  ActiveSlot,
   AlertItem,
   ArbitrageSummary,
   ChartPoint,
   ItemMetrics,
-  JournalResponse,
   MarketStatus,
   MLStatusResponse,
   OvernightResponse,
@@ -119,48 +117,6 @@ export const api = {
   // Arbitrage
   arbitrageSummary: (members: boolean) =>
     request<ArbitrageSummary>(`/api/arbitrage/summary?members=${members}`),
-
-  // Slots & Journal
-  slots: () => request<{ used_slots: number; free_slots: number; slots: ActiveSlot[] }>('/api/slots'),
-  startSlot: (body: {
-    slot_number?: number;
-    item_id: number;
-    item_name: string;
-    status?: 'BUYING' | 'BOUGHT' | 'SELLING';
-    quantity: number;
-    buy_price: number;
-    target_sell_price: number;
-    flip_mode?: 'active' | 'overnight';
-  }) =>
-    request<ActiveSlot>('/api/slots', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  updateSlot: (
-    slotNumber: number,
-    body: {
-      status?: 'BUYING' | 'BOUGHT' | 'SELLING';
-      quantity?: number;
-      buy_price?: number;
-      target_sell_price?: number;
-      flip_mode?: 'active' | 'overnight';
-    },
-  ) =>
-    request<ActiveSlot>(`/api/slots/${slotNumber}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }),
-  completeSlot: (slotNumber: number, body: { sell_price?: number; quantity?: number } = {}) =>
-    request<{ net_profit: number; tax_paid: number; roi_pct: number }>(
-      `/api/slots/${slotNumber}/complete`,
-      {
-        method: 'POST',
-        body: JSON.stringify(body),
-      },
-    ),
-  deleteSlot: (slotNumber: number) =>
-    request<{ deleted: boolean }>(`/api/slots/${slotNumber}`, { method: 'DELETE' }),
-  journal: (limit = 100) => request<JournalResponse>(`/api/journal?limit=${limit}`),
 
   // Settings & Alerts
   settings: () => request<UserSettings>('/api/settings'),

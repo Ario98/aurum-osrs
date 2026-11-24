@@ -6,9 +6,9 @@ import {
   Clock,
   Copy,
   Flame,
-  Play,
   ShieldCheck,
   Sparkles,
+  Star,
   TrendingUp,
 } from 'lucide-react';
 import type { TradeCall } from '../types';
@@ -19,14 +19,14 @@ import { MLSignalBadge } from './MLSignalBadge';
 interface Props {
   call: TradeCall;
   rank: number;
-  onStartFlip: (call: TradeCall) => Promise<void>;
+  isWatched: boolean;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (itemId: number) => void;
-  disabledStart?: boolean;
 }
 
-export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledStart }: Props) {
+export function TradeCallCard({ call, rank, isWatched, onToggleWatch, onOpenChart }: Props) {
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const meta = STRATEGY_META[call.strategy] || STRATEGY_META.auto_mix;
   const isDump = call.strategy === 'dump_sniper' && Boolean(call.dump_details);
@@ -55,12 +55,12 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
     window.setTimeout(() => setCopied(null), 1200);
   };
 
-  const handleStart = async () => {
-    setStarting(true);
+  const handleToggleWatch = async () => {
+    setToggling(true);
     try {
-      await onStartFlip(call);
+      await onToggleWatch({ id: call.item_id, name: call.item_name, low: call.buy_price });
     } finally {
-      setStarting(false);
+      setToggling(false);
     }
   };
 
@@ -295,13 +295,17 @@ export function TradeCallCard({ call, rank, onStartFlip, onOpenChart, disabledSt
             Inspect
           </button>
           <button
-            onClick={handleStart}
-            disabled={starting || disabledStart}
-            className="flex items-center gap-1 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-40 transition"
-            title={disabledStart ? 'All 8 GE slots are full' : 'Assign this trade to a free GE slot'}
+            onClick={handleToggleWatch}
+            disabled={toggling}
+            className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              isWatched
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/20'
+                : 'border-white/[0.1] bg-zinc-900 text-zinc-200 hover:border-amber-400/35 hover:text-amber-200'
+            }`}
+            title={isWatched ? 'Unpin from top Watch bar' : 'Pin live price & trend tab to top Watch bar'}
           >
-            <Play className="h-3.5 w-3.5 fill-current" />
-            {starting ? 'Adding...' : 'Start Flip'}
+            <Star className={`h-3.5 w-3.5 ${isWatched ? 'fill-current' : ''}`} />
+            {isWatched ? 'Watching' : 'Watch'}
           </button>
         </div>
       </div>

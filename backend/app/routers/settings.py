@@ -35,7 +35,6 @@ class SettingsUpdateRequest(BaseModel):
     sound_enabled: Optional[bool] = None
     discord_dump_alerts: Optional[bool] = None
     discord_arb_alerts: Optional[bool] = None
-    discord_coach_alerts: Optional[bool] = None
     alert_min_dump_score: Optional[float] = Field(default=None, ge=30, le=99)
     alert_min_arb_profit: Optional[int] = Field(default=None, ge=1_000)
 
@@ -90,7 +89,6 @@ async def get_settings_endpoint(request: Request) -> dict[str, Any]:
     repo = request.app.state.repo
     cfg = request.app.state.settings
     saved = await repo.get_all_settings()
-    base_url = str(request.base_url).rstrip("/")
     return {
         "cash_stack": int(saved.get("cash_stack", cfg.default_cash_stack)),
         "ge_slots": int(saved.get("ge_slots", cfg.default_ge_slots)),
@@ -101,10 +99,8 @@ async def get_settings_endpoint(request: Request) -> dict[str, Any]:
         "sound_enabled": bool(saved.get("sound_enabled", True)),
         "discord_dump_alerts": bool(saved.get("discord_dump_alerts", True)),
         "discord_arb_alerts": bool(saved.get("discord_arb_alerts", True)),
-        "discord_coach_alerts": bool(saved.get("discord_coach_alerts", True)),
         "alert_min_dump_score": float(saved.get("alert_min_dump_score", 72)),
         "alert_min_arb_profit": int(saved.get("alert_min_arb_profit", 75_000)),
-        "dink_webhook_url": f"{base_url}/api/webhooks/dink?token={cfg.dink_webhook_token}",
         "wiki_user_agent": cfg.wiki_user_agent,
     }
 
@@ -132,7 +128,7 @@ async def test_discord_alert(body: TestDiscordRequest, request: Request) -> dict
     alerts = request.app.state.alerts
     ok = await alerts.send_discord(
         title="Aurum — Discord Alerts Connected!",
-        message="Discord alerts are live. You will receive Dump Snipes, Instant Arbitrage, and Offer Coach warnings here.",
+        message="Discord alerts are live. You will receive Dump Snipes, Instant Arbitrage, and Watchlist price triggers here.",
         severity="success",
         webhook_url=body.webhook_url or None,
     )

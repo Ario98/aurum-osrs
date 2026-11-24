@@ -10,10 +10,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.engine.arbitrage import scan_item_sets, scan_potion_decanting
-from app.engine.coach import evaluate_slot
 from app.engine.state import MarketState
 from app.engine.strategies import generate_overnight_flips, generate_trade_calls
 from app.engine.tax import calculate_ge_tax, calculate_net_flip, is_tax_exempt_name
+from app.entitlements import FeatureKey, PlanTier, build_entitlements_payload, has_feature
 
 
 def test_ge_tax_exact_rules():
@@ -193,19 +193,6 @@ def test_metrics_and_trade_calls():
     if lob_ov:
         assert lob_ov[0]["sell_price"] <= 92
 
-    # Coach flags queue-locked Air rune buy & stale 94 gp Lobster overnight sell
-    coach_air = evaluate_slot(
-        {"slot_number": 2, "item_id": 556, "item_name": "Air rune", "status": "BUYING", "quantity": 50000, "buy_price": 5, "target_sell_price": 6, "opened_at": now - 600, "flip_mode": "active"},
-        state,
-    )
-    assert coach_air["coach_action"] == "CANCEL"
-    coach_lob = evaluate_slot(
-        {"slot_number": 1, "item_id": 379, "item_name": "Lobster", "status": "SELLING", "quantity": 10000, "buy_price": 87, "target_sell_price": 94, "opened_at": now - 3600, "flip_mode": "overnight"},
-        state,
-    )
-    assert coach_lob["coach_action"] == "RELIST_SELL"
-    assert coach_lob["recommended_price"] <= 92
-
     # Dedicated overnight flips anchored to 7d hourly percentile band
     overnight = generate_overnight_flips(state, cash_stack=25_000_000, slots=8, style="balanced", members=True)
     assert len(overnight) > 0
@@ -326,165 +313,27 @@ def test_arbitrage_decanting_and_sets():
     assert any(p["category"] == "ENCHANT" and p["output_name"] == "Ring of dueling(8)" and p["tax"] == 0 for p in proc)
 
 
-def test_offer_coach_signals():
-    state = _build_sample_state()
-    now = int(time.time())
-
-    # Outbid buy offer
-    slot_outbid = {
-        "slot_number": 1,
-        "item_id": 4151,
-        "item_name": "Abyssal whip",
-        "status": "BUYING",
-        "quantity": 5,
-        "buy_price": 1_490_000,
-        "target_sell_price": 1_559_000,
-        "opened_at": now - 300,
-    }
-    res = evaluate_slot(slot_outbid, state)
-    assert res["coach_action"] == "RELIST_BUY"
-    assert res["recommended_price"] == 1_500_001
-
-    # Bailout warning on crashing item
-    slot_crash = {
-        "slot_number": 2,
-        "item_id": 99999,
-        "item_name": "Crashed Bandos item",
-        "status": "SELLING",
-        "quantity": 1,
-        "buy_price": 9_900_000,
-        "target_sell_price": 10_200_000,
-        "opened_at": now - 600,
-    }
-    res2 = evaluate_slot(slot_crash, state)
-    assert res2["coach_action"] == "BAILOUT_WARNING"
-    assert res2["coach_severity"] == "danger"
-
-    # Overnight mode stays calm on a normal ~2% lower bid instead of nagging RELIST_BUY
-    slot_night_calm = {
-        "slot_number": 3,
-        "item_id": 4151,
-        "item_name": "Abyssal whip",
-        "status": "BUYING",
-        "quantity": 5,
-        "buy_price": 1_475_000,  # ~1.7% below 1.5M live low -> normal overnight dip bid
-        "target_sell_price": 1_560_000,
-        "opened_at": now - 600,
-        "flip_mode": "overnight",
-    }
-    res_night = evaluate_slot(slot_night_calm, state)
-    assert res_night["coach_action"] == "HOLD"
-    assert res_night["flip_mode"] == "overnight"
-
-    # LOWER_BID clears cleanly once user applies the recommended lower bid price
-    slot_dump_buy = {
-        "slot_number": 4,
-        "item_id": 99999,
-        "item_name": "Crashed Bandos item",
-        "status": "BUYING",
-        "quantity": 1,
-        "buy_price": 8_000_000,
-        "target_sell_price": 8_200_000,
-        "opened_at": now - 120,
-    }
-    res_lower = evaluate_slot(slot_dump_buy, state)
-    assert res_lower["coach_action"] == "LOWER_BID"
-    rec = res_lower["recommended_price"]
-    assert rec is not None and rec < 8_000_000
-    slot_dump_buy["buy_price"] = rec
-    res_after = evaluate_slot(slot_dump_buy, state)
-    assert res_after["coach_action"] == "HOLD"
-    assert res_after["recommended_price"] is None
-
-
-@pytest.mark.asyncio
-async def test_dink_webhook_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
-    monkeypatch.setenv("DINK_WEBHOOK_TOKEN", "secret-test-token")
-    monkeypatch.setenv("APP_PASSWORD", "")
-
+def test_silent_entitlements_registry(monkeypatch: pytest.MonkeyPatch):
     from app.config import get_settings
-    from app.db.database import Database
-    from app.db.repository import Repository
-    from app.alerts.dispatcher import AlertDispatcher
-    from app.main import WebSocketHub
-    from app.routers import slots as slots_router, webhooks as webhooks_router
-    from fastapi import FastAPI
 
+    # Default self-hosted/private mode: billing_enforced=False -> everything unlocked, zero upgrade UI
+    monkeypatch.setenv("BILLING_ENFORCED", "false")
     get_settings.cache_clear()
-    cfg = get_settings()
-    db = Database(cfg.db_file)
-    await db.connect()
-    repo = Repository(db)
-    state = _build_sample_state()
-    ws_hub = WebSocketHub()
-    alerts = AlertDispatcher(cfg, repo, ws_hub.broadcast)
+    cfg_free = get_settings()
+    assert has_feature(FeatureKey.ML_PREDICTIONS, cfg_free, PlanTier.FREE) is True
+    assert has_feature(FeatureKey.ML_BOOST, cfg_free, PlanTier.FREE) is True
+    payload = build_entitlements_payload(cfg_free, PlanTier.FREE)
+    assert payload["show_upgrade_ui"] is False
+    assert all(payload["features"].values())
 
-    test_app = FastAPI()
-    test_app.state.settings = cfg
-    test_app.state.db = db
-    test_app.state.repo = repo
-    test_app.state.market_state = state
-    test_app.state.ws_hub = ws_hub
-    test_app.state.alerts = alerts
-    test_app.include_router(slots_router.router)
-    test_app.include_router(webhooks_router.router)
-
-    client = TestClient(test_app)
-
-    # Unauthorized without token
-    r_unauth = client.post("/api/webhooks/dink", json={"type": "GRAND_EXCHANGE"})
-    assert r_unauth.status_code == 401
-
-    # Dink BOUGHT event (multipart/form-data like when screenshot attached)
-    bought_payload = {
-        "type": "GRAND_EXCHANGE",
-        "playerName": "Flipper",
-        "extra": {
-            "slot": 1,
-            "status": "BOUGHT",
-            "item": {"id": 4151, "name": "Abyssal whip", "quantity": 5, "priceEach": 1_500_000},
-        },
-    }
-    r_bought = client.post(
-        "/api/webhooks/dink?token=secret-test-token",
-        data={"payload_json": json.dumps(bought_payload)},
-    )
-    assert r_bought.status_code == 200
-    slots_data = client.get("/api/slots").json()
-    assert slots_data["used_slots"] == 1
-    assert slots_data["slots"][0]["status"] == "BOUGHT"
-
-    # Dink SOLD event (application/json)
-    sold_payload = {
-        "type": "GRAND_EXCHANGE",
-        "playerName": "Flipper",
-        "extra": {
-            "slot": 1,
-            "status": "SOLD",
-            "item": {"id": 4151, "name": "Abyssal whip", "quantity": 5, "priceEach": 1_560_000},
-        },
-    }
-    r_sold = client.post("/api/webhooks/dink?token=secret-test-token", json=sold_payload)
-    assert r_sold.status_code == 200
-
-    # Slot cleared, flip logged with exact 2% post-tax profit!
-    assert client.get("/api/slots").json()["used_slots"] == 0
-    journal = client.get("/api/journal").json()
-    assert journal["summary"]["total_flips"] == 1
-    assert len(journal["analytics"]["equity_curve"]) == 1
-    assert len(journal["analytics"]["top_winners"]) == 1
-    csv_res = client.get("/api/journal/export.csv")
-    assert csv_res.status_code == 200
-    assert "Abyssal whip" in csv_res.text
-    expected_tax = calculate_ge_tax(1_560_000) * 5
-    expected_profit = (1_560_000 - 1_500_000) * 5 - expected_tax
-    assert journal["summary"]["total_profit"] == expected_profit
-    assert len(journal["buy_limits"]) == 1
-    assert journal["buy_limits"][0]["quantity_bought"] == 5
-
-    await alerts.close()
-    await db.close()
+    # Future SaaS mode: billing_enforced=True -> Pro features cleanly gated by plan
+    monkeypatch.setenv("BILLING_ENFORCED", "true")
+    get_settings.cache_clear()
+    cfg_saas = get_settings()
+    assert has_feature(FeatureKey.ML_PREDICTIONS, cfg_saas, PlanTier.FREE) is False
+    assert has_feature(FeatureKey.ML_PREDICTIONS, cfg_saas, PlanTier.PRO) is True
+    assert build_entitlements_payload(cfg_saas, PlanTier.FREE)["show_upgrade_ui"] is True
+    assert build_entitlements_payload(cfg_saas, PlanTier.PRO)["show_upgrade_ui"] is False
     get_settings.cache_clear()
 
 

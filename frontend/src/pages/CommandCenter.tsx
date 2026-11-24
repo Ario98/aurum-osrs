@@ -9,10 +9,10 @@ import {
   Layers,
   LayoutGrid,
   LayoutList,
-  Play,
   RefreshCw,
   Shield,
   Sparkles,
+  Star,
   Zap,
 } from 'lucide-react';
 import { BadgePill, STRATEGY_META } from '../components/BadgePill';
@@ -37,10 +37,10 @@ interface Props {
   mlBoost: boolean;
   onToggleMlBoost: () => void;
   tradeData: TradeCallsResponse | null;
-  slotsFull: boolean;
+  starredIds: Set<number>;
   loading: boolean;
   onRefresh: () => void;
-  onStartFlip: (call: TradeCall) => Promise<void>;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (itemId: number) => void;
   onOpenMlLab: () => void;
 }
@@ -52,10 +52,10 @@ export function CommandCenter({
   mlBoost,
   onToggleMlBoost,
   tradeData,
-  slotsFull,
+  starredIds,
   loading,
   onRefresh,
-  onStartFlip,
+  onToggleWatch,
   onOpenChart,
   onOpenMlLab,
 }: Props) {
@@ -178,9 +178,9 @@ export function CommandCenter({
               key={call.item_id}
               call={call}
               rank={idx + 1}
-              onStartFlip={onStartFlip}
+              isWatched={starredIds.has(call.item_id)}
+              onToggleWatch={onToggleWatch}
               onOpenChart={onOpenChart}
-              disabledStart={slotsFull}
             />
           ))}
         </div>
@@ -213,7 +213,7 @@ export function CommandCenter({
                 align="right"
               />
             </span>
-            <span className="text-right w-[158px]">Trade</span>
+            <span className="text-right w-[158px]">Watch / Chart</span>
           </div>
 
           <div className="divide-y divide-white/[0.05]">
@@ -222,8 +222,8 @@ export function CommandCenter({
                 key={call.item_id}
                 call={call}
                 rank={idx + 1}
-                disabledStart={slotsFull}
-                onStartFlip={onStartFlip}
+                isWatched={starredIds.has(call.item_id)}
+                onToggleWatch={onToggleWatch}
                 onOpenChart={onOpenChart}
               />
             ))}
@@ -237,18 +237,18 @@ export function CommandCenter({
 function TradeCallRow({
   call,
   rank,
-  disabledStart,
-  onStartFlip,
+  isWatched,
+  onToggleWatch,
   onOpenChart,
 }: {
   call: TradeCall;
   rank: number;
-  disabledStart: boolean;
-  onStartFlip: (call: TradeCall) => Promise<void>;
+  isWatched: boolean;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (itemId: number) => void;
 }) {
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const meta = STRATEGY_META[call.strategy] || STRATEGY_META.auto_mix;
   const isDump = call.strategy === 'dump_sniper' && Boolean(call.dump_details);
@@ -441,24 +441,30 @@ function TradeCallRow({
         <div className="flex items-center justify-end gap-1.5 lg:w-[158px]">
           <button
             onClick={() => onOpenChart(call.item_id)}
+            title="Open full item chart & calculator"
             className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-zinc-900/90 px-2.5 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white transition"
           >
             <BarChart3 className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={async () => {
-              setStarting(true);
+              setToggling(true);
               try {
-                await onStartFlip(call);
+                await onToggleWatch({ id: call.item_id, name: call.item_name, low: call.buy_price });
               } finally {
-                setStarting(false);
+                setToggling(false);
               }
             }}
-            disabled={starting || disabledStart}
-            className="flex flex-1 lg:flex-initial items-center justify-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-40 transition"
+            disabled={toggling}
+            title={isWatched ? 'Unpin from top Watch bar' : 'Pin live price & trend tab to top Watch bar'}
+            className={`flex flex-1 lg:flex-initial items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              isWatched
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/20'
+                : 'border-white/[0.1] bg-zinc-900 text-zinc-200 hover:border-amber-400/35 hover:text-amber-200'
+            }`}
           >
-            <Play className="h-3 w-3 fill-current" />
-            {starting ? 'Adding' : 'Start Flip'}
+            <Star className={`h-3 w-3 ${isWatched ? 'fill-current' : ''}`} />
+            {isWatched ? 'Watching' : 'Watch'}
           </button>
         </div>
       </div>

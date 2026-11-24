@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.auth import require_auth
 from app.engine.strategies import generate_overnight_flips, generate_trade_calls
+from app.entitlements import FeatureKey, build_entitlements_payload, has_feature
 from app.routers.system import compute_quick_health
 
 router = APIRouter(prefix="/api/market", tags=["market"], dependencies=[Depends(require_auth)])
@@ -31,6 +32,7 @@ async def market_status(request: Request) -> dict[str, Any]:
         "total_wiki_requests": wiki.total_requests,
         "health_status": health_status,
         "health_issues": health_issues,
+        "entitlements": build_entitlements_payload(request.app.state.settings),
     }
 
 
@@ -54,23 +56,15 @@ async def get_trade_calls(
     eff_cash = cash_stack if cash_stack is not None else int(saved.get("cash_stack", settings.default_cash_stack))
     eff_members = members if members is not None else bool(saved.get("members", settings.default_members))
 
-    active_slots = await repo.get_active_slots()
-    used_slot_count = len(active_slots)
     max_ge_slots = 8 if eff_members else 3
     configured_slots = min(max_ge_slots, int(saved.get("ge_slots", settings.default_ge_slots)))
-    eff_free_slots = (
-        min(max_ge_slots, free_slots)
-        if free_slots is not None
-        else max(1, configured_slots - used_slot_count)
-    )
-    exclude_ids = {int(s["item_id"]) for s in active_slots}
+    eff_free_slots = min(max_ge_slots, free_slots) if free_slots is not None else max(1, configured_slots)
 
-    limits = await repo.get_active_buy_limits()
-    buy_limit_used = {int(l["item_id"]): int(l["quantity_bought"]) for l in limits}
-
-    ml_loaded = bool(ml and ml.loaded)
-    ml_validated = bool(ml and ml.validated)
-    eff_ml_boost = bool(ml_boost and ml_validated)
+    ml_allowed = has_feature(FeatureKey.ML_PREDICTIONS, settings)
+    ml_boost_allowed = has_feature(FeatureKey.ML_BOOST, settings)
+    ml_loaded = bool(ml_allowed and ml and ml.loaded)
+    ml_validated = bool(ml_allowed and ml and ml.validated)
+    eff_ml_boost = bool(ml_boost_allowed and ml_boost and ml_validated)
 
     calls = generate_trade_calls(
         state=state,
@@ -78,8 +72,6 @@ async def get_trade_calls(
         free_slots=eff_free_slots,
         mode=mode,
         members=eff_members,
-        exclude_item_ids=exclude_ids,
-        buy_limit_used=buy_limit_used,
         min_safety=min_safety,
         count=count,
         ml_predictions=(ml.predictions if ml_loaded else None),
@@ -92,7 +84,7 @@ async def get_trade_calls(
     return {
         "cash_stack": eff_cash,
         "free_slots": eff_free_slots,
-        "active_slots_count": used_slot_count,
+        "active_slots_count": 0,
         "mode": mode,
         "members": eff_members,
         "ml_meta": {
@@ -129,14 +121,11 @@ async def get_overnight_flips(
     eff_members = members if members is not None else bool(saved.get("members", settings.default_members))
     eff_slots = min(slots, 8 if eff_members else 3)
 
-    active_slots = await repo.get_active_slots()
-    exclude_ids = {int(s["item_id"]) for s in active_slots}
-    limits = await repo.get_active_buy_limits()
-    buy_limit_used = {int(l["item_id"]): int(l["quantity_bought"]) for l in limits}
-
-    ml_loaded = bool(ml and ml.loaded)
-    ml_validated = bool(ml and ml.validated)
-    eff_ml_boost = bool(ml_boost and ml_validated)
+    ml_allowed = has_feature(FeatureKey.ML_PREDICTIONS, settings)
+    ml_boost_allowed = has_feature(FeatureKey.ML_BOOST, settings)
+    ml_loaded = bool(ml_allowed and ml and ml.loaded)
+    ml_validated = bool(ml_allowed and ml and ml.validated)
+    eff_ml_boost = bool(ml_boost_allowed and ml_boost and ml_validated)
 
     flips = generate_overnight_flips(
         state=state,
@@ -144,8 +133,6 @@ async def get_overnight_flips(
         slots=eff_slots,
         style=style,
         members=eff_members,
-        exclude_item_ids=exclude_ids,
-        buy_limit_used=buy_limit_used,
         count=count,
         ml_predictions=(ml.predictions if ml_loaded else None),
         ml_boost_active=eff_ml_boost,
@@ -279,7 +266,8 @@ async def get_item_detail(item_id: int, request: Request) -> dict[str, Any]:
     if not m:
         raise HTTPException(status_code=404, detail="Item not found")
     meta = state.items.get(item_id, {})
-    pred = ml.predictions.get(item_id) if (ml and ml.loaded) else None
+    ml_allowed = has_feature(FeatureKey.ML_PREDICTIONS, request.app.state.settings)
+    pred = ml.predictions.get(item_id) if (ml_allowed and ml and ml.loaded) else None
     return {
         **m.to_dict(),
         "examine": meta.get("examine", ""),

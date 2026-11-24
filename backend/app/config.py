@@ -46,10 +46,12 @@ class Settings(BaseSettings):
     app_password: str = ""
     session_secret: str = "dev-only-change-me-in-production"
     session_ttl_hours: int = 168  # 7 days
-    dink_webhook_token: str = "change-me-dink-token"
 
     # Optional Discord Webhook default (also editable live in UI settings)
     discord_webhook_url: Optional[str] = None
+
+    # Future SaaS billing toggle (False = all Pro features silently unlocked with zero paywall UI)
+    billing_enforced: bool = False
 
     # Default user bankroll settings
     default_cash_stack: int = 25_000_000

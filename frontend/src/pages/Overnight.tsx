@@ -9,10 +9,10 @@ import {
   LayoutGrid,
   LayoutList,
   Moon,
-  Play,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Star,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { BadgePill, OVERNIGHT_RISK_META } from '../components/BadgePill';
@@ -32,10 +32,9 @@ interface Props {
   members: boolean;
   mlBoost: boolean;
   onToggleMlBoost: () => void;
-  slotsFull: boolean;
+  starredIds: Set<number>;
   tickVersion: number;
-  slotsVersion: number;
-  onStartOvernight: (flip: OvernightFlip) => Promise<void>;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (itemId: number) => void;
   onOpenMlLab: () => void;
 }
@@ -45,10 +44,9 @@ export function Overnight({
   members,
   mlBoost,
   onToggleMlBoost,
-  slotsFull,
+  starredIds,
   tickVersion,
-  slotsVersion,
-  onStartOvernight,
+  onToggleWatch,
   onOpenChart,
   onOpenMlLab,
 }: Props) {
@@ -82,7 +80,7 @@ export function Overnight({
 
   useEffect(() => {
     fetchOvernight();
-  }, [fetchOvernight, tickVersion, slotsVersion]);
+  }, [fetchOvernight, tickVersion]);
 
   return (
     <div className="space-y-5">
@@ -95,7 +93,7 @@ export function Overnight({
           <div>
             <h1 className="text-xl font-bold tracking-tight text-zinc-100">Overnight Flips</h1>
             <p className="text-xs text-zinc-500">
-              8–12h bids anchored to recent 48h hourly 25th→75th percentile bands · Overnight Coach stays quiet while you sleep
+              8–12h bids anchored to recent 48h hourly 25th→75th percentile bands · Star items to track live overnight moves
             </p>
           </div>
         </div>
@@ -233,7 +231,7 @@ export function Overnight({
                 align="right"
               />
             </span>
-            <span className="text-right w-[166px]">Action</span>
+            <span className="text-right w-[166px]">Watch / Chart</span>
           </div>
           <div className="divide-y divide-white/[0.05]">
             {data.flips.map((flip, idx) => (
@@ -241,8 +239,8 @@ export function Overnight({
                 key={flip.item_id}
                 flip={flip}
                 rank={idx + 1}
-                slotsFull={slotsFull}
-                onStart={onStartOvernight}
+                isWatched={starredIds.has(flip.item_id)}
+                onToggleWatch={onToggleWatch}
                 onOpenChart={onOpenChart}
               />
             ))}
@@ -255,8 +253,8 @@ export function Overnight({
               key={flip.item_id}
               flip={flip}
               rank={idx + 1}
-              slotsFull={slotsFull}
-              onStart={onStartOvernight}
+              isWatched={starredIds.has(flip.item_id)}
+              onToggleWatch={onToggleWatch}
               onOpenChart={onOpenChart}
             />
           ))}
@@ -269,18 +267,18 @@ export function Overnight({
 function OvernightRow({
   flip,
   rank,
-  slotsFull,
-  onStart,
+  isWatched,
+  onToggleWatch,
   onOpenChart,
 }: {
   flip: OvernightFlip;
   rank: number;
-  slotsFull: boolean;
-  onStart: (f: OvernightFlip) => Promise<void>;
+  isWatched: boolean;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (id: number) => void;
 }) {
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const span = Math.max(1, flip.max_7d - flip.min_7d);
   const buyPct = Math.max(0, Math.min(100, ((flip.buy_price - flip.min_7d) / span) * 100));
@@ -418,24 +416,30 @@ function OvernightRow({
         <div className="flex items-center justify-end gap-1.5 lg:w-[166px]">
           <button
             onClick={() => onOpenChart(flip.item_id)}
+            title="Open full item chart & calculator"
             className="rounded-lg border border-white/[0.08] bg-zinc-900 p-1.5 text-zinc-300 hover:bg-zinc-800 hover:text-white"
           >
             <BarChart3 className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={async () => {
-              setStarting(true);
+              setToggling(true);
               try {
-                await onStart(flip);
+                await onToggleWatch({ id: flip.item_id, name: flip.item_name, low: flip.live_low });
               } finally {
-                setStarting(false);
+                setToggling(false);
               }
             }}
-            disabled={starting || slotsFull}
-            className="flex flex-1 lg:flex-initial items-center justify-center gap-1.5 rounded-lg bg-indigo-500/20 border border-indigo-400/35 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-40 transition"
+            disabled={toggling}
+            title={isWatched ? 'Unpin from top Watch bar' : 'Pin live price & trend tab to top Watch bar'}
+            className={`flex flex-1 lg:flex-initial items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              isWatched
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/20'
+                : 'border-white/[0.1] bg-zinc-900 text-zinc-200 hover:border-amber-400/35 hover:text-amber-200'
+            }`}
           >
-            <Moon className="h-3 w-3" />
-            {starting ? 'Adding' : 'Start Night'}
+            <Star className={`h-3 w-3 ${isWatched ? 'fill-current' : ''}`} />
+            {isWatched ? 'Watching' : 'Watch'}
           </button>
         </div>
       </div>
@@ -446,18 +450,18 @@ function OvernightRow({
 function OvernightCard({
   flip,
   rank,
-  slotsFull,
-  onStart,
+  isWatched,
+  onToggleWatch,
   onOpenChart,
 }: {
   flip: OvernightFlip;
   rank: number;
-  slotsFull: boolean;
-  onStart: (f: OvernightFlip) => Promise<void>;
+  isWatched: boolean;
+  onToggleWatch: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
   onOpenChart: (id: number) => void;
 }) {
   const [copied, setCopied] = useState<'buy' | 'sell' | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const span = Math.max(1, flip.max_7d - flip.min_7d);
   const buyPct = Math.max(0, Math.min(100, ((flip.buy_price - flip.min_7d) / span) * 100));
@@ -549,17 +553,22 @@ function OvernightCard({
           </button>
           <button
             onClick={async () => {
-              setStarting(true);
+              setToggling(true);
               try {
-                await onStart(flip);
+                await onToggleWatch({ id: flip.item_id, name: flip.item_name, low: flip.live_low });
               } finally {
-                setStarting(false);
+                setToggling(false);
               }
             }}
-            disabled={starting || slotsFull}
-            className="flex items-center gap-1 rounded-lg bg-indigo-500/20 border border-indigo-400/35 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/30 disabled:opacity-40"
+            disabled={toggling}
+            className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              isWatched
+                ? 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/20'
+                : 'border-white/[0.1] bg-zinc-900 text-zinc-200 hover:border-amber-400/35 hover:text-amber-200'
+            }`}
           >
-            <Play className="h-3 w-3 fill-current" /> Start Night
+            <Star className={`h-3 w-3 ${isWatched ? 'fill-current' : ''}`} />
+            {isWatched ? 'Watching' : 'Watch'}
           </button>
         </div>
       </div>
