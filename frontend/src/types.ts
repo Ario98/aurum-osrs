@@ -149,6 +149,15 @@ export interface ItemMetrics {
   price_change_24h_pct: number;
   volume_spike_ratio: number;
   seasonality_bias_pct: number;
+  p25_48h?: number | null;
+  p75_48h?: number | null;
+  min_48h?: number | null;
+  max_48h?: number | null;
+  p25_7d?: number | null;
+  p75_7d?: number | null;
+  min_7d?: number | null;
+  max_7d?: number | null;
+  trend_7d_pct?: number;
   dump_timeframe?: string;
   dump_baseline_vwap?: number | null;
   dump_drop_pct?: number;

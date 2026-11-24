@@ -29,11 +29,11 @@ import {
 } from './components/AurumLogo';
 import { CommandPalette } from './components/CommandPalette';
 import { HelpModal } from './components/HelpModal';
-import { ItemModal } from './components/ItemModal';
 import { SlotRibbon } from './components/SlotRibbon';
 import { useMarketSocket } from './hooks/useMarketSocket';
 import { Arbitrage } from './pages/Arbitrage';
 import { CommandCenter } from './pages/CommandCenter';
+import { ItemDetail } from './pages/ItemDetail';
 import { Journal } from './pages/Journal';
 import { Overnight } from './pages/Overnight';
 import { Scanner } from './pages/Scanner';
@@ -53,6 +53,23 @@ import type {
 import { formatGp, parseGpInput, playAlertChime } from './utils/format';
 
 type NavTab = 'command' | 'overnight' | 'watchlist' | 'scanner' | 'arbitrage' | 'journal' | 'settings';
+
+const TAB_LABELS: Record<NavTab, string> = {
+  command: 'Trade Calls',
+  overnight: 'Overnight',
+  watchlist: 'Watchlist',
+  scanner: 'Scanner',
+  arbitrage: 'Arbitrage',
+  journal: 'Journal',
+  settings: 'Settings',
+};
+
+function parseItemIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/item\/(\d+)\/?$/);
+  if (!m) return null;
+  const id = Number(m[1]);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
 
 const BANK_PRESETS = [
   { label: '5M', value: 5_000_000 },
@@ -92,12 +109,44 @@ export default function App() {
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(() => parseItemIdFromPath());
 
   const [tickVersion, setTickVersion] = useState(0);
   const [slotsVersion, setSlotsVersion] = useState(0);
   const [watchlistVersion, setWatchlistVersion] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
+
+  const openItemPage = useCallback((id: number) => {
+    setSelectedItemId(id);
+    const targetPath = `/item/${id}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ itemId: id }, '', targetPath);
+    }
+  }, []);
+
+  const closeItemPage = useCallback(() => {
+    setSelectedItemId(null);
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+    }
+  }, []);
+
+  const navigateTab = useCallback((tab: NavTab) => {
+    setActiveTab(tab);
+    setSelectedItemId(null);
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+    }
+  }, []);
+
+  // Keep browser Back / Forward buttons synced with /item/<id>
+  useEffect(() => {
+    const onPopState = () => {
+      setSelectedItemId(parseItemIdFromPath());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
@@ -397,7 +446,7 @@ export default function App() {
         <div className="flex flex-col items-center gap-5 w-full px-2">
           {/* Logo Mark */}
           <button
-            onClick={() => setActiveTab('command')}
+            onClick={() => navigateTab('command')}
             className="group flex h-10 w-10 items-center justify-center rounded-xl shadow-[0_0_24px_rgba(245,158,11,0.16)] transition hover:scale-105 hover:shadow-[0_0_28px_rgba(245,158,11,0.3)]"
             title={`${BRAND_NAME} — ${BRAND_SUBTITLE}`}
           >
@@ -407,11 +456,11 @@ export default function App() {
           {/* Navigation Icons */}
           <nav className="flex flex-col items-center gap-1.5 w-full">
             {navItems.map((n) => {
-              const active = activeTab === n.key;
+              const active = selectedItemId === null && activeTab === n.key;
               return (
                 <button
                   key={n.key}
-                  onClick={() => setActiveTab(n.key)}
+                  onClick={() => navigateTab(n.key)}
                   title={n.label}
                   className={`group relative flex h-11 w-full flex-col items-center justify-center gap-0.5 rounded-xl transition ${
                     active
@@ -434,7 +483,7 @@ export default function App() {
         <div className="flex flex-col items-center gap-2 px-2 w-full">
           <button
             onClick={() => {
-              setActiveTab('settings');
+              navigateTab('settings');
               setSettingsSubTab('health');
             }}
             className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/[0.06] transition"
@@ -483,7 +532,7 @@ export default function App() {
             {/* Left: Brand Wordmark + Ctrl+K Instant Search Trigger */}
             <div className="flex flex-1 min-w-0 items-center gap-3">
               <button
-                onClick={() => setActiveTab('command')}
+                onClick={() => navigateTab('command')}
                 className="flex shrink-0 items-center gap-2 rounded-lg py-1 pr-1 text-left transition hover:opacity-90"
                 title={`${BRAND_NAME} — ${BRAND_SUBTITLE}`}
               >
@@ -515,7 +564,7 @@ export default function App() {
               {/* Clickable Smart Health Status Pill -> Settings > System & Data Health */}
               <button
                 onClick={() => {
-                  setActiveTab('settings');
+                  navigateTab('settings');
                   setSettingsSubTab('health');
                 }}
                 className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
@@ -677,7 +726,7 @@ export default function App() {
             await api.deleteSlot(slotNum);
             await refreshSlots();
           }}
-          onOpenChart={setSelectedItemId}
+          onOpenChart={openItemPage}
         />
 
         {/* Fast Bootstrap Banner */}
@@ -692,73 +741,96 @@ export default function App() {
         )}
 
         {/* Main Workspace Canvas */}
-        <main className="mx-auto w-full max-w-[1520px] flex-1 px-4 py-6">
-          {activeTab === 'command' && (
-            <CommandCenter
+        <main
+          className={`mx-auto w-full flex-1 px-4 ${
+            selectedItemId !== null ? 'max-w-[1680px] py-4' : 'max-w-[1520px] py-6'
+          }`}
+        >
+          {selectedItemId !== null ? (
+            <ItemDetail
+              itemId={selectedItemId}
+              backLabel={TAB_LABELS[activeTab]}
               cashStack={cashStack}
-              mode={mode}
-              onChangeMode={setMode}
-              mlBoost={mlBoost}
-              onToggleMlBoost={() => setMlBoost((b) => !b)}
-              tradeData={tradeData}
+              freeSlots={Math.max(1, (members ? 8 : 3) - slots.length)}
               slotsFull={slots.length >= (members ? 8 : 3)}
-              loading={loadingTrades}
-              onRefresh={refreshTradeCalls}
-              onStartFlip={handleStartFlip}
-              onOpenChart={setSelectedItemId}
-              onOpenMlLab={() => {
-                setActiveTab('settings');
-                setSettingsSubTab('ml');
-              }}
-            />
-          )}
-
-          {activeTab === 'overnight' && (
-            <Overnight
-              cashStack={cashStack}
-              members={members}
-              mlBoost={mlBoost}
-              onToggleMlBoost={() => setMlBoost((b) => !b)}
-              slotsFull={slots.length >= (members ? 8 : 3)}
+              activeSlots={slots}
+              isStarred={starredIds.has(selectedItemId)}
               tickVersion={tickVersion}
               slotsVersion={slotsVersion}
-              onStartOvernight={handleStartOvernightFlip}
-              onOpenChart={setSelectedItemId}
-              onOpenMlLab={() => {
-                setActiveTab('settings');
-                setSettingsSubTab('ml');
-              }}
+              onBack={closeItemPage}
+              onToggleStar={handleToggleStar}
+              onStartCustomFlip={handleStartCustomFlip}
             />
-          )}
+          ) : (
+            <>
+              {activeTab === 'command' && (
+                <CommandCenter
+                  cashStack={cashStack}
+                  mode={mode}
+                  onChangeMode={setMode}
+                  mlBoost={mlBoost}
+                  onToggleMlBoost={() => setMlBoost((b) => !b)}
+                  tradeData={tradeData}
+                  slotsFull={slots.length >= (members ? 8 : 3)}
+                  loading={loadingTrades}
+                  onRefresh={refreshTradeCalls}
+                  onStartFlip={handleStartFlip}
+                  onOpenChart={openItemPage}
+                  onOpenMlLab={() => {
+                    navigateTab('settings');
+                    setSettingsSubTab('ml');
+                  }}
+                />
+              )}
 
-          {activeTab === 'watchlist' && (
-            <Watchlist
-              tickVersion={tickVersion}
-              watchlistVersion={watchlistVersion}
-              onWatchlistChanged={refreshWatchlistIds}
-              onOpenChart={setSelectedItemId}
-            />
-          )}
+              {activeTab === 'overnight' && (
+                <Overnight
+                  cashStack={cashStack}
+                  members={members}
+                  mlBoost={mlBoost}
+                  onToggleMlBoost={() => setMlBoost((b) => !b)}
+                  slotsFull={slots.length >= (members ? 8 : 3)}
+                  tickVersion={tickVersion}
+                  slotsVersion={slotsVersion}
+                  onStartOvernight={handleStartOvernightFlip}
+                  onOpenChart={openItemPage}
+                  onOpenMlLab={() => {
+                    navigateTab('settings');
+                    setSettingsSubTab('ml');
+                  }}
+                />
+              )}
 
-          {activeTab === 'scanner' && (
-            <Scanner members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
-          )}
+              {activeTab === 'watchlist' && (
+                <Watchlist
+                  tickVersion={tickVersion}
+                  watchlistVersion={watchlistVersion}
+                  onWatchlistChanged={refreshWatchlistIds}
+                  onOpenChart={openItemPage}
+                />
+              )}
 
-          {activeTab === 'arbitrage' && (
-            <Arbitrage members={members} tickVersion={tickVersion} onOpenChart={setSelectedItemId} />
-          )}
+              {activeTab === 'scanner' && (
+                <Scanner members={members} tickVersion={tickVersion} onOpenChart={openItemPage} />
+              )}
 
-          {activeTab === 'journal' && (
-            <Journal slotsVersion={slotsVersion} onOpenChart={setSelectedItemId} />
-          )}
+              {activeTab === 'arbitrage' && (
+                <Arbitrage members={members} tickVersion={tickVersion} onOpenChart={openItemPage} />
+              )}
 
-          {activeTab === 'settings' && (
-            <Settings
-              activeSubTab={settingsSubTab}
-              onChangeSubTab={setSettingsSubTab}
-              onSettingsSaved={handleSettingsSaved}
-              onModelUpdated={() => setTickVersion((v) => v + 1)}
-            />
+              {activeTab === 'journal' && (
+                <Journal slotsVersion={slotsVersion} onOpenChart={openItemPage} />
+              )}
+
+              {activeTab === 'settings' && (
+                <Settings
+                  activeSubTab={settingsSubTab}
+                  onChangeSubTab={setSettingsSubTab}
+                  onSettingsSaved={handleSettingsSaved}
+                  onModelUpdated={() => setTickVersion((v) => v + 1)}
+                />
+              )}
+            </>
           )}
         </main>
 
@@ -786,11 +858,11 @@ export default function App() {
       {/* Mobile / iPhone Fixed Bottom Navigation Bar */}
       <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 grid grid-cols-7 border-t border-white/[0.08] bg-[#07070a]/95 px-1 py-1.5 backdrop-blur-xl">
         {navItems.map((n) => {
-          const active = activeTab === n.key;
+          const active = selectedItemId === null && activeTab === n.key;
           return (
             <button
               key={n.key}
-              onClick={() => setActiveTab(n.key)}
+              onClick={() => navigateTab(n.key)}
               className={`flex flex-col items-center justify-center gap-0.5 rounded-lg py-1 text-[10px] font-medium transition ${
                 active ? 'text-amber-300' : 'text-zinc-500'
               }`}
@@ -807,17 +879,7 @@ export default function App() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        onSelectItem={setSelectedItemId}
-      />
-      <ItemModal
-        itemId={selectedItemId}
-        cashStack={cashStack}
-        freeSlots={Math.max(1, (members ? 8 : 3) - slots.length)}
-        slotsFull={slots.length >= (members ? 8 : 3)}
-        isStarred={selectedItemId !== null && starredIds.has(selectedItemId)}
-        onToggleStar={handleToggleStar}
-        onClose={() => setSelectedItemId(null)}
-        onStartCustomFlip={handleStartCustomFlip}
+        onSelectItem={openItemPage}
       />
       <AlertDrawer
         open={alertDrawerOpen}
@@ -825,13 +887,13 @@ export default function App() {
         onClose={() => setAlertDrawerOpen(false)}
         onOpenItem={(id) => {
           setAlertDrawerOpen(false);
-          setSelectedItemId(id);
+          openItemPage(id);
         }}
       />
       <AlertToastStack
         toasts={toasts}
         onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
-        onOpenItem={setSelectedItemId}
+        onOpenItem={openItemPage}
       />
     </div>
   );
