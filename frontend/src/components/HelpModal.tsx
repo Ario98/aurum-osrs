@@ -411,6 +411,10 @@ export function HelpModal({ open, onClose }: Props) {
                     abnormal vs. 24h VWAP.
                   </li>
                   <li>
+                    <strong className="text-zinc-200">QUEUE_LOCKED:</strong> 1–3 gp spread (like Air/Fire runes 5→6 gp)
+                    where you cannot outbid +1 gp to jump ahead of massive FIFO queues — excluded from Fast Flips.
+                  </li>
+                  <li>
                     <strong className="text-zinc-200">FALLING_KNIFE:</strong> Heavy sustained sell pressure with no
                     support yet — avoid overnight holds.
                   </li>

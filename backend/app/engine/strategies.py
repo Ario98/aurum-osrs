@@ -72,19 +72,24 @@ def generate_trade_calls(
         reason_parts: list[str] = []
 
         if mode == "fast_flip":
-            # Fast Flips require fresh live quotes (<=10m), active 5m tape, and real two-sided hourly flow
+            # Fast Flips require front-of-queue spreads (>=4 gp), fresh live quotes (<=10m),
+            # active two-sided 5m tape, and non-dumping order flow so orders actually fill fast.
             if m.safety_score < min_safety or m.fast_flip_score < 20:
                 continue
-            if max(m.high_age_sec, m.low_age_sec) > 600:
+            if m.raw_margin < 4 or "QUEUE_LOCKED" in m.manipulation_flags:
+                continue
+            if max(m.high_age_sec or 999999, m.low_age_sec or 999999) > 600:
                 continue
             if m.vol_1h_low < 6 or m.vol_1h_high < 6:
                 continue
-            if m.vol_5m < 2:
+            if m.vol_5m_high < 1 or m.vol_5m_low < 1:
+                continue
+            if m.ofi_5m < -0.5:
                 continue
             score = m.fast_flip_score
-            reason_parts.append("Fast high-volume spread")
+            reason_parts.append("Front-of-queue fast flip")
         elif mode == "overnight":
-            if m.safety_score < max(35, min_safety - 10) or m.overnight_score < 20:
+            if m.safety_score < max(35, min_safety - 10) or m.overnight_score < 20 or m.raw_margin < 4:
                 continue
             score = m.overnight_score
             reason_parts.append("High margin per 4h limit")
@@ -100,12 +105,12 @@ def generate_trade_calls(
                 f"{ref_z:.1f}σ vs {m.dump_timeframe} hourly avg · Bounce: {m.dump_bounce_outlook}"
             )
         elif mode == "alch_floor":
-            if m.alch_floor_score < 20:
+            if m.alch_floor_score < 20 or m.raw_margin < 4:
                 continue
             score = m.alch_floor_score
             reason_parts.append(f"Protected near High Alch floor ({m.alch_floor_pct:+.1f}%)")
         else:
-            # auto_mix: pick strongest valid edge for this item
+            # auto_mix: pick strongest valid edge for this item (skip FIFO queue-locked 1-3 gp spreads)
             if (
                 m.dump_sniper_score >= 65
                 and m.dump_conservative_target
@@ -121,15 +126,20 @@ def generate_trade_calls(
                 reason_parts.append(
                     f"{ref_z:.1f}σ vs {m.dump_timeframe} hourly avg · Bounce: {m.dump_bounce_outlook}"
                 )
-            elif m.fast_flip_score >= m.overnight_score and m.fast_flip_score >= 25 and m.safety_score >= min_safety:
+            elif (
+                m.raw_margin >= 4
+                and m.fast_flip_score >= m.overnight_score
+                and m.fast_flip_score >= 25
+                and m.safety_score >= min_safety
+            ):
                 strategy_tag = "fast_flip"
                 score = m.fast_flip_score
                 reason_parts.append("Fast high-volume flip")
-            elif m.alch_floor_score >= 45 and m.safety_score >= min_safety:
+            elif m.raw_margin >= 4 and m.alch_floor_score >= 45 and m.safety_score >= min_safety:
                 strategy_tag = "alch_floor"
                 score = m.alch_floor_score
                 reason_parts.append("Safe High-Alch floor")
-            elif m.overnight_score >= 30 and m.safety_score >= max(40, min_safety - 5):
+            elif m.raw_margin >= 4 and m.overnight_score >= 30 and m.safety_score >= max(40, min_safety - 5):
                 strategy_tag = "overnight"
                 score = m.overnight_score
                 reason_parts.append("Big-margin swing")
@@ -340,7 +350,12 @@ def generate_overnight_flips(
             continue
         if not m.high or not m.low or m.high <= 0 or m.low <= 0:
             continue
-        if not m.p25_7d or not m.p75_7d or not m.min_7d or not m.max_7d:
+        # Skip penny/1-2 gp queue-locked items that stall behind massive FIFO stacks overnight
+        if m.low < 25 or (m.high - m.low) < 3:
+            continue
+        ref_p25 = m.p25_48h or m.p25_7d
+        ref_p75 = m.p75_48h or m.p75_7d
+        if not ref_p25 or not ref_p75 or not m.min_7d or not m.max_7d:
             continue
         if "INVERTED_SPREAD" in m.manipulation_flags or "OUTLIER_SPREAD" in m.manipulation_flags:
             continue
@@ -351,7 +366,7 @@ def generate_overnight_flips(
             continue
 
         max_age = max(m.high_age_sec or 999999, m.low_age_sec or 999999)
-        if max_age > 7200:
+        if max_age > 3600:
             continue
 
         min_vol_24h = 200 if style == "safe" else (30 if style == "high_margin" else 60)
@@ -365,16 +380,19 @@ def generate_overnight_flips(
         if style == "high_margin" and m.safety_score < 38:
             continue
 
-        # Smart overnight bid & morning sell target anchored to 7d hourly 25th -> 75th percentile
-        # Keep buy bid within 3.5% of live low so it reliably fills while sleeping
-        floor_bid = int(m.low * 0.965)
-        overnight_buy = max(floor_bid, min(m.low, m.p25_7d))
+        # Anchor overnight bid & sell to the RECENT 48-hour price regime (not stale 6-day-old spikes)
+        # Keep buy bid within -1.5% of live low so it reliably fills while sleeping.
+        floor_bid = int(m.low * 0.985)
+        if ref_p25 >= m.low and (m.high - m.low) >= 4:
+            overnight_buy = m.low + 1
+        else:
+            overnight_buy = max(floor_bid, min(m.low, ref_p25))
         if overnight_buy <= 0 or overnight_buy > per_slot_cap:
             continue
 
-        # Keep sell target realistic: anchored near 75th percentile or live high (capped within +6% of live high)
-        ceil_ask = int(m.high * 1.05)
-        overnight_sell = min(ceil_ask, max(m.high - 1, m.p75_7d))
+        # Keep morning sell target realistic: anchored to 48h 75th percentile, capped within +2.5% of live high
+        ceil_ask = int(m.high * 1.025)
+        overnight_sell = min(ceil_ask, max(m.high - 1, ref_p75))
         if overnight_sell <= overnight_buy:
             continue
 
@@ -486,10 +504,12 @@ def generate_overnight_flips(
                     "safety_score": m.safety_score,
                     "trend_7d_pct": round(m.trend_7d_pct, 2),
                     "volatility_24h_pct": round(m.volatility_24h_pct, 2),
-                    "min_7d": m.min_7d,
-                    "p25_7d": m.p25_7d,
-                    "p75_7d": m.p75_7d,
-                    "max_7d": m.max_7d,
+                    "min_7d": m.min_48h or m.min_7d,
+                    "p25_7d": ref_p25,
+                    "p75_7d": ref_p75,
+                    "max_7d": m.max_48h or m.max_7d,
+                    "p25_48h": ref_p25,
+                    "p75_48h": ref_p75,
                     "score": round(min(99.0, total_score), 1),
                     "reason": " · ".join(reasons),
                     "ml": ml_pred.to_dict() if ml_pred is not None else None,

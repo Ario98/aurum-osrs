@@ -43,6 +43,10 @@ class CachedCandleStats:
     vwap_7d: Optional[float] = None
     std_7d: float = 0.0
     candles_1h_count: int = 0
+    p25_48h: Optional[int] = None
+    p75_48h: Optional[int] = None
+    min_48h: Optional[int] = None
+    max_48h: Optional[int] = None
     p25_7d: Optional[int] = None
     p75_7d: Optional[int] = None
     min_7d: Optional[int] = None
@@ -114,7 +118,11 @@ class ItemMetrics:
     volume_spike_ratio: float
     seasonality_bias_pct: float
 
-    # Overnight / 7-day range & stability metrics
+    # Overnight / 48h recent & 7-day range & stability metrics
+    p25_48h: Optional[int]
+    p75_48h: Optional[int]
+    min_48h: Optional[int]
+    max_48h: Optional[int]
     p25_7d: Optional[int]
     p75_7d: Optional[int]
     min_7d: Optional[int]
@@ -197,6 +205,10 @@ class ItemMetrics:
             "price_change_24h_pct": round(self.price_change_24h_pct, 2),
             "volume_spike_ratio": round(self.volume_spike_ratio, 2),
             "seasonality_bias_pct": round(self.seasonality_bias_pct, 2),
+            "p25_48h": self.p25_48h,
+            "p75_48h": self.p75_48h,
+            "min_48h": self.min_48h,
+            "max_48h": self.max_48h,
             "p25_7d": self.p25_7d,
             "p75_7d": self.p75_7d,
             "min_7d": self.min_7d,
@@ -341,6 +353,7 @@ class MarketState:
         """Rebuild cached 5m/1h/24h/7d candle statistics (called only when new candle buckets arrive)."""
         t0 = time.perf_counter()
         now = int(time.time())
+        cutoff_48h = now - 48 * 3600
         cutoff_24h = now - 24 * 3600
         cutoff_1h = now - 3600
         cutoff_5m = now - 15 * 60
@@ -374,6 +387,9 @@ class MarketState:
 
                 prices_24h: list[float] = []
                 vols_24h: list[int] = []
+                prices_48h: list[float] = []
+                highs_48h: list[int] = []
+                lows_48h: list[int] = []
                 prices_7d: list[float] = []
                 vols_7d: list[int] = []
                 highs_7d: list[int] = []
@@ -397,6 +413,13 @@ class MarketState:
                         if al:
                             lows_7d.append(al)
                         hour_buckets[(ts // 3600) % 24].append(bucket_mid)
+
+                        if ts >= cutoff_48h:
+                            prices_48h.append(bucket_mid)
+                            if ah:
+                                highs_48h.append(ah)
+                            if al:
+                                lows_48h.append(al)
 
                     if ts >= cutoff_24h:
                         cs.vol_24h_h += vh
@@ -439,6 +462,26 @@ class MarketState:
                     cs.p75_7d = int(round(float(np.percentile(arr_p, 75))))
                     cs.min_7d = int(round(float(np.min(arr_p))))
                     cs.max_7d = int(round(float(np.max(arr_p))))
+
+                # Recent 48h range so Overnight targets reflect the CURRENT price regime (not 6-day-old spikes)
+                if len(lows_48h) >= 4 and len(highs_48h) >= 4:
+                    arr_l48 = np.array(lows_48h, dtype=np.float64)
+                    arr_h48 = np.array(highs_48h, dtype=np.float64)
+                    cs.p25_48h = int(round(float(np.percentile(arr_l48, 25))))
+                    cs.p75_48h = int(round(float(np.percentile(arr_h48, 75))))
+                    cs.min_48h = int(round(float(np.percentile(arr_l48, 5))))
+                    cs.max_48h = int(round(float(np.percentile(arr_h48, 95))))
+                elif len(prices_48h) >= 4:
+                    arr_p48 = np.array(prices_48h, dtype=np.float64)
+                    cs.p25_48h = int(round(float(np.percentile(arr_p48, 25))))
+                    cs.p75_48h = int(round(float(np.percentile(arr_p48, 75))))
+                    cs.min_48h = int(round(float(np.min(arr_p48))))
+                    cs.max_48h = int(round(float(np.max(arr_p48))))
+                else:
+                    cs.p25_48h = cs.p25_7d
+                    cs.p75_48h = cs.p75_7d
+                    cs.min_48h = cs.min_7d
+                    cs.max_48h = cs.max_7d
 
                 if cs.vwap_24h and cs.vwap_7d and cs.vwap_7d > 0:
                     cs.trend_7d_pct = ((cs.vwap_24h - cs.vwap_7d) / cs.vwap_7d) * 100.0
@@ -597,6 +640,9 @@ class MarketState:
                 flags.append("STALE_QUOTE")
             if high and low and low > high:
                 flags.append("INVERTED_SPREAD")
+            elif high and low and 0 <= raw_margin < 4:
+                # 1-3 gp spreads cannot outbid low+1 & undercut high-1 -> FIFO queue trap (e.g. Air/Fire runes 5->6)
+                flags.append("QUEUE_LOCKED")
             if vol_24h < 20 or eff_vol_1h_h == 0 or eff_vol_1h_l == 0:
                 flags.append("LOW_LIQUIDITY")
             if vwap_24h and vwap_24h > 0 and high and low:
@@ -631,12 +677,19 @@ class MarketState:
 
             # Composite Strategy Scores
             fast_flip_score = 0.0
-            if net_margin > 0 and "INVERTED_SPREAD" not in flags and "LOW_LIQUIDITY" not in flags and max_age <= 1800:
+            if (
+                net_margin > 0
+                and raw_margin >= 4
+                and "INVERTED_SPREAD" not in flags
+                and "LOW_LIQUIDITY" not in flags
+                and "QUEUE_LOCKED" not in flags
+                and max_age <= 900
+            ):
                 roi_pts = _clamp(net_roi_pct * 8.0, 0, 28)
                 gph_pts = _clamp(math.log10(max(est_gp_per_hour_limit, 1)) * 5.0 - 15.0, 0, 30)
                 liq_pts = _clamp(math.log10(max(eff_vol_1h, 1)) * 6.0, 0, 20)
                 bal_pts = (1.0 - abs(ofi_1h)) * 12.0
-                fresh_pts = _clamp(10.0 - (max_age / 180.0), 0, 10)
+                fresh_pts = _clamp(10.0 - (max_age / 90.0), 0, 10)
                 fast_flip_score = _clamp(
                     (roi_pts + gph_pts + liq_pts + bal_pts + fresh_pts) * (safety_score / 100.0),
                     0.0,
@@ -685,7 +738,7 @@ class MarketState:
                 is_sudden_shock = zscore_24h <= -1.6 and trend_7d_drift_pct > -4.5
                 is_downtrend_bleed = trend_7d_drift_pct <= -5.0 and zscore_24h > -1.4
 
-                if ref_z <= -1.6 and vol_24h >= 150 and (low_age or 99999) <= 900:
+                if ref_z <= -1.6 and vol_24h >= 150 and (low_age or 99999) <= 600:
                     rebound_tax = calculate_ge_tax(
                         dump_conservative_target, item_name=name, exempt=is_tax_exempt
                     )
@@ -792,6 +845,10 @@ class MarketState:
                 price_change_24h_pct=price_change_24h_pct,
                 volume_spike_ratio=volume_spike_ratio,
                 seasonality_bias_pct=seasonality_bias_pct,
+                p25_48h=cs.p25_48h,
+                p75_48h=cs.p75_48h,
+                min_48h=cs.min_48h,
+                max_48h=cs.max_48h,
                 p25_7d=cs.p25_7d,
                 p75_7d=cs.p75_7d,
                 min_7d=cs.min_7d,

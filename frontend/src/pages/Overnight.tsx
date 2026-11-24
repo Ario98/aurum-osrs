@@ -95,7 +95,7 @@ export function Overnight({
           <div>
             <h1 className="text-xl font-bold tracking-tight text-zinc-100">Overnight Flips</h1>
             <p className="text-xs text-zinc-500">
-              8–12h bids anchored to 7d hourly 25th→75th percentile bands · Overnight Coach stays quiet while you sleep
+              8–12h bids anchored to recent 48h hourly 25th→75th percentile bands · Overnight Coach stays quiet while you sleep
             </p>
           </div>
         </div>
@@ -219,10 +219,10 @@ export function Overnight({
             <span>Night Bid → Morning Sell</span>
             <span className="text-right">Est. Net / ROI</span>
             <span className="flex items-center gap-1">
-              7d Oscillation Band
+              48h Price Band
               <InfoTooltip
-                title="7-Day p25 → p75 Price Corridor"
-                text="Shows where your overnight buy bid and morning sell target sit inside the item's typical 7-day hourly trading range."
+                title="Recent 48h p25 → p75 Corridor"
+                text="Anchored strictly to the last 48 hours of hourly candles (not stale week-old prices) so your overnight bid and morning sell target stay inside today's real trading range."
               />
             </span>
             <span className="flex items-center justify-end gap-1">

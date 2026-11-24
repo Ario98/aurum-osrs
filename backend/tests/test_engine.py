@@ -139,10 +139,72 @@ def test_metrics_and_trade_calls():
     f2p_calls = generate_trade_calls(state, cash_stack=10_000_000, free_slots=8, mode="auto_mix", members=False)
     assert all(not c["members"] for c in f2p_calls)
 
-    # Fast Flips enforce live 5m volume and quick <=45m round-trip cycle sizing
+    # Fast Flips enforce live 5m volume, front-of-queue >=4 gp spread, and quick <=45m cycle sizing
     f2p_fast = generate_trade_calls(state, cash_stack=5_000_000, free_slots=8, mode="fast_flip", members=False)
     assert len(f2p_fast) > 0
     assert all(not c["members"] and c["est_fill_minutes"] <= 45.0 for c in f2p_fast)
+
+    # Regression test 1: 1-gp FIFO queue-locked runes (5->6 gp) must NEVER appear in Fast Flips
+    now = int(time.time())
+    state.load_items(
+        list(state.items.values())
+        + [
+            {"id": 556, "name": "Air rune", "members": 0, "buy_limit": 50000, "highalch": 2, "lowalch": 1, "is_tax_exempt": 0, "icon": ""},
+            {"id": 379, "name": "Lobster", "members": 0, "buy_limit": 10000, "highalch": 72, "lowalch": 48, "is_tax_exempt": 1, "icon": ""},
+        ]
+    )
+    state.update_latest(
+        {
+            556: {"high": 6, "highTime": now - 5, "low": 5, "lowTime": now - 5},
+            379: {"high": 92, "highTime": now - 10, "low": 89, "lowTime": now - 10},
+        }
+    )
+    # Give Air rune massive 1h & 5m volume (classic 20% ROI FIFO trap)
+    for h in range(1, 25):
+        ts = ((now // 3600) - h) * 3600
+        state.ingest_candle_bucket(
+            "1h", ts, {556: {"avgHighPrice": 6, "avgLowPrice": 5, "highPriceVolume": 900_000, "lowPriceVolume": 900_000}}
+        )
+    state.ingest_candle_bucket(
+        "5m", ((now // 300) - 1) * 300, {556: {"avgHighPrice": 6, "avgLowPrice": 5, "highPriceVolume": 80_000, "lowPriceVolume": 80_000}}
+    )
+    # Regression test 2: Lobster traded at 94-100 gp 5-6 days ago, then shifted to 87-91 gp for the last 4 days.
+    # Recent 48h anchor must NOT recommend stale 94 gp sell!
+    for h in range(1, 165):
+        ts = ((now // 3600) - h) * 3600
+        if h <= 96:
+            lob = {"avgHighPrice": 90, "avgLowPrice": 87, "highPriceVolume": 5000, "lowPriceVolume": 5000}
+        else:
+            lob = {"avgHighPrice": 97, "avgLowPrice": 93, "highPriceVolume": 5000, "lowPriceVolume": 5000}
+        state.ingest_candle_bucket("1h", ts, {379: lob})
+    state.recompute_all_metrics()
+
+    air = state.metrics[556]
+    assert "QUEUE_LOCKED" in air.manipulation_flags
+    assert air.fast_flip_score == 0.0
+    f2p_fast_after = generate_trade_calls(state, cash_stack=5_000_000, free_slots=3, mode="fast_flip", members=False)
+    assert all(c["item_id"] != 556 for c in f2p_fast_after)
+
+    lob_m = state.metrics[379]
+    assert lob_m.p75_48h == 90
+    assert lob_m.p75_7d >= 94  # 7d still shows the old regime, while 48h tracks the live regime!
+    ov_f2p = generate_overnight_flips(state, cash_stack=2_000_000, slots=3, style="balanced", members=False)
+    lob_ov = [f for f in ov_f2p if f["item_id"] == 379]
+    if lob_ov:
+        assert lob_ov[0]["sell_price"] <= 92
+
+    # Coach flags queue-locked Air rune buy & stale 94 gp Lobster overnight sell
+    coach_air = evaluate_slot(
+        {"slot_number": 2, "item_id": 556, "item_name": "Air rune", "status": "BUYING", "quantity": 50000, "buy_price": 5, "target_sell_price": 6, "opened_at": now - 600, "flip_mode": "active"},
+        state,
+    )
+    assert coach_air["coach_action"] == "CANCEL"
+    coach_lob = evaluate_slot(
+        {"slot_number": 1, "item_id": 379, "item_name": "Lobster", "status": "SELLING", "quantity": 10000, "buy_price": 87, "target_sell_price": 94, "opened_at": now - 3600, "flip_mode": "overnight"},
+        state,
+    )
+    assert coach_lob["coach_action"] == "RELIST_SELL"
+    assert coach_lob["recommended_price"] <= 92
 
     # Dedicated overnight flips anchored to 7d hourly percentile band
     overnight = generate_overnight_flips(state, cash_stack=25_000_000, slots=8, style="balanced", members=True)

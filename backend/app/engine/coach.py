@@ -40,18 +40,21 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
 
         if is_overnight:
             # ------------------------------------------------------------------
-            # OVERNIGHT MODE: Quiet during normal swings, alerts ONLY on major breaks
+            # OVERNIGHT MODE: Quiet during normal swings, anchored to fresh 48h regime
             # ------------------------------------------------------------------
+            ref_p25 = m.p25_48h or m.p25_7d or live_low
+            ref_p75 = m.p75_48h or m.p75_7d or live_high
+
             if status == "BUYING":
                 gap_above_bid_pct = ((live_low - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
-                new_bid = min(live_low, m.p25_7d or live_low)
-                if gap_above_bid_pct > 5.0 and new_bid > buy_price:
+                new_bid = max(int(live_low * 0.988), min(live_low, ref_p25))
+                if gap_above_bid_pct > 2.5 and new_bid > buy_price:
                     coach_action = "RELIST_BUY"
                     coach_severity = "warning"
                     recommended_price = new_bid
                     coach_message = (
-                        f"Market ran +{gap_above_bid_pct:.1f}% above your overnight bid "
-                        f"({live_low:,} gp). Raise bid to {new_bid:,} gp or pick another overnight item."
+                        f"Market is +{gap_above_bid_pct:.1f}% above your overnight bid "
+                        f"({live_low:,} gp vs {buy_price:,}). Raise bid to {new_bid:,} gp so it fills tonight."
                     )
                 elif m.trend_7d_pct < -5.5:
                     coach_action = "CANCEL"
@@ -67,15 +70,18 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
                     )
 
             elif status == "BOUGHT":
-                rec_sell = max(live_high - 1, m.p75_7d or live_high)
+                rec_sell = min(int(live_high * 1.025), max(live_high - 1, ref_p75))
                 coach_action = "LIST_SELL"
                 coach_severity = "success"
                 recommended_price = rec_sell
-                coach_message = f"Overnight buy filled! List morning sell target at {rec_sell:,} gp."
+                coach_message = f"Overnight buy filled! List sell target at {rec_sell:,} gp (48h peak {ref_p75:,})."
 
             elif status == "SELLING":
                 drop_from_buy_pct = ((live_high - buy_price) / buy_price) * 100.0 if buy_price > 0 else 0.0
                 broke_7d_floor = bool(m.min_7d and live_low < int(m.min_7d * 0.97))
+                realistic_cap = min(int(live_high * 1.025), max(live_high, ref_p75))
+                realistic_sell = max(live_high - 1, min(realistic_cap, ref_p75))
+                sell_gap_pct = ((target_sell - realistic_cap) / realistic_cap) * 100.0 if realistic_cap > 0 else 0.0
                 if drop_from_buy_pct <= -6.0 or (broke_7d_floor and m.ofi_1h < -0.5):
                     rec_bail = max(live_low, live_high - 1)
                     coach_action = "BAILOUT_WARNING"
@@ -93,9 +99,19 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
                     coach_action = "HOLD"
                     coach_severity = "success"
                     coach_message = f"Live high hit {live_high:,} gp — your overnight sell ({target_sell:,}) should fill soon!"
+                elif target_sell > realistic_sell and (sell_gap_pct >= 1.5 or target_sell >= realistic_cap + 2):
+                    rec_tax = calculate_ge_tax(realistic_sell, item_name=m.name, exempt=m.is_tax_exempt)
+                    rec_net = (realistic_sell - buy_price - rec_tax) * qty
+                    coach_action = "RELIST_SELL"
+                    coach_severity = "warning"
+                    recommended_price = realistic_sell
+                    coach_message = (
+                        f"Sell target ({target_sell:,}) is above recent 48h peak ({ref_p75:,} gp, live high {live_high:,}). "
+                        f"Lower to {realistic_sell:,} gp ({rec_net:+,} gp net) to cash out cleanly."
+                    )
                 else:
                     coach_message = (
-                        f"Overnight sell resting in 7d band ({target_sell:,} vs live high {live_high:,}). Hold patiently."
+                        f"Overnight sell resting in 48h band ({target_sell:,} vs live high {live_high:,}). Hold patiently."
                     )
         else:
             # ------------------------------------------------------------------
@@ -129,8 +145,29 @@ def evaluate_slot(slot: dict[str, Any], state: MarketState) -> dict[str, Any]:
                         coach_action = "CANCEL"
                         coach_severity = "danger"
                         coach_message = f"Margin collapsed after 2% tax (live {live_low:,} -> {live_high:,}). Cancel buy offer."
+                elif buy_price == live_low and (live_high - live_low) < 4:
+                    coach_action = "CANCEL"
+                    coach_severity = "warning"
+                    coach_message = (
+                        f"Queue-locked spread ({live_low:,}->{live_high:,} gp) — tied behind bulk FIFO orders. "
+                        "Cancel and pick an item with a >=4 gp spread for fast fills."
+                    )
+                elif buy_price == live_low and (live_high - live_low) >= 4 and elapsed_min >= 5.0:
+                    new_buy = live_low + 1
+                    new_tax = calculate_ge_tax(live_high - 1, item_name=m.name, exempt=m.is_tax_exempt)
+                    new_margin = (live_high - 1) - new_buy - new_tax
+                    if new_margin > 0:
+                        coach_action = "RELIST_BUY"
+                        coach_severity = "warning"
+                        recommended_price = new_buy
+                        coach_message = (
+                            f"Tied at live low ({live_low:,} gp) for {int(elapsed_min)}m — bump +1 gp to "
+                            f"{new_buy:,} gp to jump to front of the queue (+{new_margin:,} gp/ea net)."
+                        )
+                    else:
+                        coach_message = f"Resting at live low ({buy_price:,} gp). Waiting to fill."
                 else:
-                    coach_message = f"Top of bid book ({buy_price:,} vs live low {live_low:,}). Waiting to fill."
+                    coach_message = f"Front of bid book ({buy_price:,} vs live low {live_low:,}). Waiting to fill."
 
             elif status == "BOUGHT":
                 rec_sell = (live_high - 1) if (live_high - live_low >= 4) else live_high
