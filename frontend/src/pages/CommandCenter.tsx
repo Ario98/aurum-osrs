@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Shield,
   Sparkles,
-  TrendingUp,
   Zap,
 } from 'lucide-react';
 import { BadgePill, STRATEGY_META } from '../components/BadgePill';
@@ -64,38 +63,14 @@ export function CommandCenter({
 
   return (
     <div className="space-y-5">
-      {/* Clean Header & KPI Strip */}
+      {/* Clean Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-zinc-100">Trade Calls</h1>
           <p className="mt-0.5 text-xs text-zinc-500">
-            Sized for <strong className="text-zinc-300 font-mono-num">{formatGp(cashStack, true)} gp</strong> · Exact 2% GE tax & 5M cap deducted
+            Sized for <strong className="text-zinc-300 font-mono-num">{formatGp(cashStack, true)} gp</strong> · Exact 2% GE tax &amp; 5M cap deducted
           </p>
         </div>
-
-        {tradeData && (
-          <div className="flex flex-wrap items-center gap-6 text-xs font-mono-num">
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Batch Profit</div>
-              <div className="text-base font-bold text-emerald-400">
-                {formatSignedGp(tradeData.summary.est_batch_profit, true)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Est. Potential</div>
-              <div className="text-base font-bold text-zinc-100 flex items-center gap-1">
-                <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
-                {formatGp(tradeData.summary.est_combined_gp_per_hour, true)}/hr
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Capital Used</div>
-              <div className="text-base font-semibold text-zinc-300">
-                {formatGp(tradeData.summary.allocated_capital, true)}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Mode Pills + View Switcher */}
