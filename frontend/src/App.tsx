@@ -652,10 +652,10 @@ export default function App() {
           </div>
         )}
 
-        {/* Main Workspace Canvas */}
+        {/* Main Workspace Canvas — aligned identically to Header & Watch Bar */}
         <main
-          className={`mx-auto w-full flex-1 px-4 ${
-            selectedItemId !== null ? 'max-w-[1680px] py-4' : 'max-w-[1520px] py-6'
+          className={`mx-auto w-full max-w-[1520px] flex-1 px-4 ${
+            selectedItemId !== null ? 'py-4' : 'py-6'
           }`}
         >
           {selectedItemId !== null ? (
