@@ -612,8 +612,16 @@ export default function App() {
                   setMembers(next);
                   api.saveSettings({ members: next }).catch(() => {});
                 }}
-                className="hidden sm:flex items-center rounded-xl border border-white/[0.08] bg-[#0c0c10] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-300 hover:border-white/[0.18] transition"
-                title="Toggle Members vs F2P items"
+                className={`hidden sm:flex items-center rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                  members
+                    ? 'border-white/[0.08] bg-[#0c0c10] text-zinc-300 hover:border-white/[0.18]'
+                    : 'border-sky-500/35 bg-sky-500/10 text-sky-300 hover:bg-sky-500/15'
+                }`}
+                title={
+                  members
+                    ? 'Members (P2P · 8 GE slots) — click to switch to F2P'
+                    : 'Free-to-Play (F2P · 3 GE slots) — click to switch to P2P'
+                }
               >
                 {members ? 'P2P' : 'F2P'}
               </button>
@@ -653,9 +661,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* Persistent 8-Slot Live Ribbon (always accessible across every screen!) */}
+        {/* Persistent Live GE Slot Ribbon (8 slots P2P, 3 slots F2P) */}
         <SlotRibbon
           slots={slots}
+          maxSlots={members ? 8 : 3}
           onUpdateSlot={async (slotNum, updates) => {
             await api.updateSlot(slotNum, updates);
             await refreshSlots();
@@ -692,7 +701,7 @@ export default function App() {
               mlBoost={mlBoost}
               onToggleMlBoost={() => setMlBoost((b) => !b)}
               tradeData={tradeData}
-              slotsFull={slots.length >= 8}
+              slotsFull={slots.length >= (members ? 8 : 3)}
               loading={loadingTrades}
               onRefresh={refreshTradeCalls}
               onStartFlip={handleStartFlip}
@@ -710,7 +719,7 @@ export default function App() {
               members={members}
               mlBoost={mlBoost}
               onToggleMlBoost={() => setMlBoost((b) => !b)}
-              slotsFull={slots.length >= 8}
+              slotsFull={slots.length >= (members ? 8 : 3)}
               tickVersion={tickVersion}
               slotsVersion={slotsVersion}
               onStartOvernight={handleStartOvernightFlip}
@@ -803,8 +812,8 @@ export default function App() {
       <ItemModal
         itemId={selectedItemId}
         cashStack={cashStack}
-        freeSlots={Math.max(1, 8 - slots.length)}
-        slotsFull={slots.length >= 8}
+        freeSlots={Math.max(1, (members ? 8 : 3) - slots.length)}
+        slotsFull={slots.length >= (members ? 8 : 3)}
         isStarred={selectedItemId !== null && starredIds.has(selectedItemId)}
         onToggleStar={handleToggleStar}
         onClose={() => setSelectedItemId(null)}

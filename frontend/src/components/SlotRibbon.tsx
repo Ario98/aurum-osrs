@@ -15,6 +15,7 @@ import { formatGp, formatSignedGp, wikiIconUrl } from '../utils/format';
 
 interface Props {
   slots: ActiveSlot[];
+  maxSlots?: number;
   onUpdateSlot: (
     slotNumber: number,
     updates: {
@@ -29,7 +30,7 @@ interface Props {
   onOpenChart: (itemId: number) => void;
 }
 
-export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, onOpenChart }: Props) {
+export function SlotRibbon({ slots, maxSlots = 8, onUpdateSlot, onCompleteSlot, onClearSlot, onOpenChart }: Props) {
   const [selectedNum, setSelectedNum] = useState<number | null>(null);
   const [applyingSlot, setApplyingSlot] = useState<number | null>(null);
   const [appliedMsg, setAppliedMsg] = useState<string>('');
@@ -39,6 +40,14 @@ export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, o
     byNumber.set(s.slot_number, s);
   }
 
+  // Always show slots 1..maxSlots (3 in F2P, 8 in P2P), plus any active higher slots so nothing disappears
+  const visibleSlotNumbers = Array.from(
+    new Set([
+      ...Array.from({ length: maxSlots }, (_, i) => i + 1),
+      ...slots.map((s) => s.slot_number),
+    ]),
+  ).sort((a, b) => a - b);
+
   const selectedSlot = selectedNum ? byNumber.get(selectedNum) || null : null;
   const attentionCount = slots.filter(
     (s) => s.coach_severity === 'warning' || s.coach_severity === 'danger',
@@ -47,12 +56,12 @@ export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, o
   return (
     <div className="border-b border-white/[0.06] bg-[#07070a]/90 backdrop-blur-md">
       <div className="mx-auto max-w-[1520px] px-4 py-2">
-        {/* Compact 8-Slot Chip Strip */}
+        {/* Compact GE Slot Chip Strip */}
         <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
           <div className="hidden lg:flex items-center gap-1.5 pr-2 shrink-0 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
             <span>GE Slots</span>
             <span className="rounded-md bg-white/[0.07] px-1.5 py-0.5 text-zinc-200 font-mono-num">
-              {slots.length}/8
+              {slots.length}/{maxSlots}
             </span>
             {attentionCount > 0 && (
               <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-amber-300 animate-pulse">
@@ -62,7 +71,7 @@ export function SlotRibbon({ slots, onUpdateSlot, onCompleteSlot, onClearSlot, o
           </div>
 
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((num) => {
+            {visibleSlotNumbers.map((num) => {
               const slot = byNumber.get(num);
               const isSelected = selectedNum === num && !!slot;
 

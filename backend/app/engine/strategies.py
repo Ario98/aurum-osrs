@@ -33,17 +33,18 @@ def generate_trade_calls(
     """Build exact, actionable Trade Calls sized to the player's bankroll & free GE slots."""
     exclude = exclude_item_ids or set()
     limit_used = buy_limit_used or {}
-    slots_to_plan = max(1, min(free_slots, 8))
+    max_ge_slots = 8 if members else 3
+    slots_to_plan = max(1, min(free_slots, max_ge_slots))
     max_results = max(count, slots_to_plan)
 
-    # Diversification budget per slot (never put >40% of bankroll into 1 slot when >=3 slots free)
+    # Diversification budget per slot (F2P only has 3 slots, so allow slightly larger share per slot)
     if slots_to_plan == 1:
         per_slot_cap = cash_stack
     elif slots_to_plan == 2:
         per_slot_cap = int(cash_stack * 0.55)
     else:
         per_slot_cap = int(cash_stack / max(slots_to_plan * 0.72, 1.0))
-        per_slot_cap = min(per_slot_cap, int(cash_stack * 0.38))
+        per_slot_cap = min(per_slot_cap, int(cash_stack * (0.45 if not members else 0.38)))
 
     candidates: list[tuple[float, str, ItemMetrics, int, int, int, int, float, int, str]] = []
 
@@ -71,7 +72,14 @@ def generate_trade_calls(
         reason_parts: list[str] = []
 
         if mode == "fast_flip":
+            # Fast Flips require fresh live quotes (<=10m), active 5m tape, and real two-sided hourly flow
             if m.safety_score < min_safety or m.fast_flip_score < 20:
+                continue
+            if max(m.high_age_sec, m.low_age_sec) > 600:
+                continue
+            if m.vol_1h_low < 6 or m.vol_1h_high < 6:
+                continue
+            if m.vol_5m < 2:
                 continue
             score = m.fast_flip_score
             reason_parts.append("Fast high-volume spread")
@@ -130,9 +138,14 @@ def generate_trade_calls(
 
         # Budget-aware sizing
         affordable_qty = per_slot_cap // buy_price
-        # Don't ask the player to buy more than ~45% of 1h volume for fast flips so fills stay snappy
-        if strategy_tag == "fast_flip" and m.vol_1h > 0:
-            flow_cap = max(1, int(min(m.vol_1h_low, m.vol_1h_high) * 0.45))
+        # Size fast flips so the buy+sell round-trip finishes in ~<=30m (capture=25%) instead of hours
+        if strategy_tag == "fast_flip" and m.vol_1h_low > 0 and m.vol_1h_high > 0:
+            harmonic_side = (m.vol_1h_low * m.vol_1h_high) / (m.vol_1h_low + m.vol_1h_high)
+            target_hours = 0.50 if mode == "fast_flip" else 1.0
+            flow_cap = max(1, int((target_hours * 0.25) * harmonic_side))
+            qty = min(remaining_limit, affordable_qty, flow_cap)
+        elif strategy_tag == "fast_flip" and m.vol_1h > 0:
+            flow_cap = max(1, int(min(m.vol_1h_low, m.vol_1h_high) * 0.15))
             qty = min(remaining_limit, affordable_qty, flow_cap)
         else:
             qty = min(remaining_limit, affordable_qty)
@@ -148,8 +161,11 @@ def generate_trade_calls(
         est_net_profit = net_unit * qty
         capital_needed = buy_price * qty
 
-        # Minimum worthwhile profit scaled to bank size
-        min_profit = max(1_500, int(cash_stack * 0.0004))
+        # Minimum worthwhile profit scaled to bank size (gentler floor in Fast Flips / F2P so snappy high-turn items show up)
+        if mode == "fast_flip":
+            min_profit = max(800, int(cash_stack * 0.0002))
+        else:
+            min_profit = max(1_500, int(cash_stack * 0.0004))
         if est_net_profit < min_profit:
             continue
 
@@ -163,11 +179,18 @@ def generate_trade_calls(
             cycle_hrs = 6.0 if strategy_tag != "fast_flip" else 2.0
 
         est_fill_min = min(cycle_hrs * 60.0, 720.0)
+        # Hard cap Fast Flips to genuinely quick round-trips (<=45m)
+        if mode == "fast_flip" and est_fill_min > 45.0:
+            continue
+
         est_gp_hr = int(est_net_profit / max(cycle_hrs, 0.08))
 
         # Personalize ranking by real GP/hr for the player's actual cash stack!
         roi_pct = (net_unit / buy_price) * 100.0
         personalized_rank = score * 0.55 + min(45.0, (est_gp_hr / max(cash_stack * 0.02, 50_000)) * 20.0)
+        if mode == "fast_flip":
+            # Extra speed lift so sub-20m flips rise cleanly above slower 40m ones
+            personalized_rank += max(0.0, (45.0 - est_fill_min) / 45.0) * 14.0
         ml_pred = ml_predictions.get(m.id) if ml_predictions else None
         if ml_boost_active and ml_pred is not None:
             # Guardrailed ML lift (±14 pts max) when walk-forward validation passed

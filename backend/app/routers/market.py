@@ -56,7 +56,13 @@ async def get_trade_calls(
 
     active_slots = await repo.get_active_slots()
     used_slot_count = len(active_slots)
-    eff_free_slots = free_slots if free_slots is not None else max(1, int(saved.get("ge_slots", settings.default_ge_slots)) - used_slot_count)
+    max_ge_slots = 8 if eff_members else 3
+    configured_slots = min(max_ge_slots, int(saved.get("ge_slots", settings.default_ge_slots)))
+    eff_free_slots = (
+        min(max_ge_slots, free_slots)
+        if free_slots is not None
+        else max(1, configured_slots - used_slot_count)
+    )
     exclude_ids = {int(s["item_id"]) for s in active_slots}
 
     limits = await repo.get_active_buy_limits()
@@ -121,6 +127,7 @@ async def get_overnight_flips(
 
     eff_cash = cash_stack if cash_stack is not None else int(saved.get("cash_stack", settings.default_cash_stack))
     eff_members = members if members is not None else bool(saved.get("members", settings.default_members))
+    eff_slots = min(slots, 8 if eff_members else 3)
 
     active_slots = await repo.get_active_slots()
     exclude_ids = {int(s["item_id"]) for s in active_slots}
@@ -134,7 +141,7 @@ async def get_overnight_flips(
     flips = generate_overnight_flips(
         state=state,
         cash_stack=eff_cash,
-        slots=slots,
+        slots=eff_slots,
         style=style,
         members=eff_members,
         exclude_item_ids=exclude_ids,
@@ -143,14 +150,14 @@ async def get_overnight_flips(
         ml_predictions=(ml.predictions if ml_loaded else None),
         ml_boost_active=eff_ml_boost,
     )
-    planned = flips[:slots]
+    planned = flips[:eff_slots]
     total_capital = sum(f["capital_required"] for f in planned)
     total_profit = sum(f["est_net_profit"] for f in planned)
     avg_roi = (total_profit / total_capital * 100.0) if total_capital > 0 else 0.0
 
     return {
         "cash_stack": eff_cash,
-        "slots": slots,
+        "slots": eff_slots,
         "style": style,
         "members": eff_members,
         "ml_meta": {

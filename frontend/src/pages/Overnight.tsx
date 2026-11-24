@@ -52,11 +52,16 @@ export function Overnight({
   onOpenChart,
   onOpenMlLab,
 }: Props) {
-  const [slots, setSlots] = useState(8);
+  const maxSlots = members ? 8 : 3;
+  const [slots, setSlots] = useState(maxSlots);
   const [style, setStyle] = useState<OvernightStyle>('balanced');
   const [view, setView] = useState<'rows' | 'grid'>('rows');
   const [data, setData] = useState<OvernightResponse | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setSlots((prev) => (members ? prev : Math.min(prev, 3)));
+  }, [members]);
 
   const fetchOvernight = useCallback(async () => {
     setLoading(true);
@@ -122,7 +127,7 @@ export function Overnight({
               onChange={(e) => setSlots(Number(e.target.value))}
               className="bg-transparent font-bold text-zinc-100 outline-none font-mono-num"
             >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+              {Array.from({ length: maxSlots }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n} className="bg-[#0c0c0f]">
                   {n}
                 </option>

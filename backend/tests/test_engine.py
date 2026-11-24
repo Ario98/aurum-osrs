@@ -111,6 +111,7 @@ def _build_sample_state() -> MarketState:
         ts5,
         {
             4151: {"avgHighPrice": 1_560_000, "avgLowPrice": 1_500_000, "highPriceVolume": 4, "lowPriceVolume": 4},
+            1127: {"avgHighPrice": 39_800, "avgLowPrice": 38_700, "highPriceVolume": 10, "lowPriceVolume": 9},
             99999: {"avgHighPrice": 8_300_000, "avgLowPrice": 8_000_000, "highPriceVolume": 2, "lowPriceVolume": 25},
         },
     )
@@ -135,8 +136,13 @@ def test_metrics_and_trade_calls():
     assert len(calls) > 0
     assert all(c["est_net_profit"] > 0 for c in calls)
 
-    f2p_calls = generate_trade_calls(state, cash_stack=10_000_000, free_slots=4, mode="auto_mix", members=False)
+    f2p_calls = generate_trade_calls(state, cash_stack=10_000_000, free_slots=8, mode="auto_mix", members=False)
     assert all(not c["members"] for c in f2p_calls)
+
+    # Fast Flips enforce live 5m volume and quick <=45m round-trip cycle sizing
+    f2p_fast = generate_trade_calls(state, cash_stack=5_000_000, free_slots=8, mode="fast_flip", members=False)
+    assert len(f2p_fast) > 0
+    assert all(not c["members"] and c["est_fill_minutes"] <= 45.0 for c in f2p_fast)
 
     # Dedicated overnight flips anchored to 7d hourly percentile band
     overnight = generate_overnight_flips(state, cash_stack=25_000_000, slots=8, style="balanced", members=True)
