@@ -57,6 +57,8 @@ export function Overnight({
   const [view, setView] = useState<'rows' | 'grid'>('rows');
   const [data, setData] = useState<OvernightResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [manualSpin, setManualSpin] = useState(false);
+  const [justUpdated, setJustUpdated] = useState(false);
 
   useEffect(() => {
     setSlots((prev) => (members ? prev : Math.min(prev, 3)));
@@ -82,6 +84,21 @@ export function Overnight({
   useEffect(() => {
     fetchOvernight();
   }, [fetchOvernight, tickVersion]);
+
+  const handleManualRefresh = async () => {
+    if (manualSpin) return;
+    setManualSpin(true);
+    setJustUpdated(false);
+    const minSpin = new Promise((r) => window.setTimeout(r, 450));
+    try {
+      await api.refreshMarket().catch(() => {});
+      await Promise.all([fetchOvernight(), minSpin]);
+      setJustUpdated(true);
+      window.setTimeout(() => setJustUpdated(false), 1200);
+    } finally {
+      setManualSpin(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -188,11 +205,22 @@ export function Overnight({
             </button>
           </div>
           <button
-            onClick={fetchOvernight}
-            className="flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-[#0b0b0f] px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-white/[0.06] hover:text-white"
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={manualSpin}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
+              justUpdated
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                : 'border-white/[0.08] bg-[#0b0b0f] text-zinc-300 hover:bg-white/[0.06] hover:text-white'
+            }`}
+            title="Fetch latest live prices from OSRS Wiki now"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            {justUpdated ? (
+              <Check className="h-3.5 w-3.5 text-emerald-400" />
+            ) : (
+              <RefreshCw className={`h-3.5 w-3.5 ${loading || manualSpin ? 'animate-spin text-amber-300' : ''}`} />
+            )}
+            {manualSpin ? 'Refreshing...' : justUpdated ? 'Updated' : 'Refresh'}
           </button>
         </div>
       </div>

@@ -36,6 +36,13 @@ async def market_status(request: Request) -> dict[str, Any]:
     }
 
 
+@router.post("/refresh")
+async def refresh_market_now(request: Request) -> dict[str, Any]:
+    """Pull fresh /latest quotes from OSRS Wiki immediately (3s cooldown guard)."""
+    collector = request.app.state.collector
+    return await collector.refresh_latest_now(min_interval_sec=3)
+
+
 @router.get("/trade-calls")
 async def get_trade_calls(
     request: Request,

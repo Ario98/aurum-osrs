@@ -206,6 +206,16 @@ export default function App() {
     }
   }, []);
 
+  const handleManualRefresh = useCallback(async () => {
+    setLoadingTrades(true);
+    try {
+      await api.refreshMarket().catch(() => {});
+      await Promise.all([refreshTradeCalls(), refreshWatchlist(), refreshStatus()]);
+    } finally {
+      setLoadingTrades(false);
+    }
+  }, [refreshTradeCalls, refreshWatchlist, refreshStatus]);
+
   useEffect(() => {
     if (!authenticated) return;
     api.settings().then((s) => {
@@ -681,7 +691,7 @@ export default function App() {
                   tradeData={tradeData}
                   starredIds={starredIds}
                   loading={loadingTrades}
-                  onRefresh={refreshTradeCalls}
+                  onRefresh={handleManualRefresh}
                   onToggleWatch={handleToggleWatch}
                   onOpenChart={openItemPage}
                   onOpenMlLab={() => {

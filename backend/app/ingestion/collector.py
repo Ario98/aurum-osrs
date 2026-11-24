@@ -254,6 +254,40 @@ class CollectorService:
         )
         await self.broadcast_cb({"type": "enrichment_complete", "progress": self.state.bootstrap_progress})
 
+    async def refresh_latest_now(self, min_interval_sec: int = 3) -> dict[str, Any]:
+        """On-demand polite /latest pull triggered by UI Refresh button (3s anti-spam guard)."""
+        now = int(time.time())
+        if self.state.last_latest_update and (now - self.state.last_latest_update) < min_interval_sec:
+            return {
+                "ok": True,
+                "fetched": False,
+                "timestamp": self.state.last_latest_update,
+                "recompute_ms": round(self.state.last_recompute_ms, 2),
+                "items_count": len(self.state.metrics),
+            }
+        latest = await self.wiki.fetch_latest()
+        recompute_ms = self.state.last_recompute_ms
+        if latest:
+            self.state.update_latest(latest)
+            await self.repo.upsert_latest_prices(latest)
+            recompute_ms = self.state.recompute_all_metrics()
+            await self.alerts.scan_and_dispatch(self.state)
+            await self.broadcast_cb(
+                {
+                    "type": "market_tick",
+                    "timestamp": self.state.last_latest_update,
+                    "recompute_ms": round(recompute_ms, 2),
+                    "items_count": len(self.state.metrics),
+                }
+            )
+        return {
+            "ok": True,
+            "fetched": bool(latest),
+            "timestamp": self.state.last_latest_update,
+            "recompute_ms": round(recompute_ms, 2),
+            "items_count": len(self.state.metrics),
+        }
+
     async def _latest_loop(self) -> None:
         """Poll /latest every 10s (configurable down to 5s), recompute, run Offer Coach & Alerts, push WS tick."""
         interval = max(5, self.settings.latest_poll_seconds)

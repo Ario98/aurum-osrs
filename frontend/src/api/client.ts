@@ -50,6 +50,11 @@ export const api = {
 
   // Market
   marketStatus: () => request<MarketStatus>('/api/market/status'),
+  refreshMarket: () =>
+    request<{ ok: boolean; fetched: boolean; timestamp: number; recompute_ms: number; items_count: number }>(
+      '/api/market/refresh',
+      { method: 'POST' },
+    ),
   tradeCalls: (params: {
     cash_stack: number;
     free_slots?: number;
