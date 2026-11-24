@@ -13,7 +13,6 @@ import {
   RefreshCw,
   ShieldCheck,
   Sparkles,
-  TrendingUp,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { BadgePill, OVERNIGHT_RISK_META } from '../components/BadgePill';
@@ -82,7 +81,7 @@ export function Overnight({
 
   return (
     <div className="space-y-5">
-      {/* Header & Summary */}
+      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300">
@@ -95,26 +94,6 @@ export function Overnight({
             </p>
           </div>
         </div>
-
-        {data && (
-          <div className="flex flex-wrap items-center gap-6 text-xs font-mono-num">
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Est. Overnight Profit</div>
-              <div className="text-base font-bold text-emerald-400 flex items-center gap-1">
-                <TrendingUp className="h-3.5 w-3.5" />
-                {formatSignedGp(data.summary.est_overnight_profit, true)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Avg Net ROI</div>
-              <div className="text-base font-bold text-amber-300">{data.summary.avg_roi_pct.toFixed(2)}%</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-sans uppercase tracking-wider text-zinc-500">Deployed ({slots} slots)</div>
-              <div className="text-base font-semibold text-zinc-300">{formatGp(data.summary.allocated_capital, true)}</div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Controls Bar */}
