@@ -474,3 +474,11 @@ async def test_ml_walk_forward_training_and_inference(tmp_path: Path):
     pred = predictor.predictions[4151]
     assert 0.0 < pred.prob_4h_win < 1.0
     assert 0.0 < pred.prob_12h_win < 1.0
+    assert pred.target_4h_price is not None and pred.target_4h_price > 0
+    assert pred.target_12h_price is not None and pred.target_12h_price > 0
+    assert pred.band_low_4h is not None and pred.band_high_4h is not None
+    assert pred.band_low_4h <= pred.target_4h_price <= pred.band_high_4h
+    assert pred.band_low_12h is not None and pred.band_high_12h is not None
+    assert pred.band_low_12h <= pred.target_12h_price <= pred.band_high_12h
+    d = pred.to_dict()
+    assert "pred_4h_roi_pct" in d and d["target_12h_price"] == pred.target_12h_price

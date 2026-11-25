@@ -358,11 +358,13 @@ def run_training_pipeline(
 
     # Fit final production models on 100% of clean dataset
     prod_4h = _fit_hgb_binary(X, y4_win)
+    prod_4h_reg = _fit_hgb_reg(X, y4_roi)
     prod_12h_cls = _fit_hgb_binary(X, y12_win)
     prod_12h_reg = _fit_hgb_reg(X, y12_roi)
 
     bundle = {
         "m4": prod_4h,
+        "m4_reg": prod_4h_reg,
         "m12_cls": prod_12h_cls,
         "m12_reg": prod_12h_reg,
         "feature_names": FEATURE_NAMES,

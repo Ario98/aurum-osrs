@@ -79,7 +79,14 @@ export interface TradeCall {
 export interface MLPrediction {
   prob_4h_pct: number;
   prob_12h_pct: number;
+  pred_4h_roi_pct?: number;
   pred_12h_roi_pct: number;
+  target_4h_price?: number | null;
+  target_12h_price?: number | null;
+  band_low_4h?: number | null;
+  band_high_4h?: number | null;
+  band_low_12h?: number | null;
+  band_high_12h?: number | null;
 }
 
 export interface MLMeta {

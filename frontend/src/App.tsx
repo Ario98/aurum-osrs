@@ -672,8 +672,6 @@ export default function App() {
             <ItemDetail
               itemId={selectedItemId}
               backLabel={TAB_LABELS[activeTab]}
-              cashStack={cashStack}
-              maxSlots={members ? 8 : 3}
               isStarred={starredIds.has(selectedItemId)}
               tickVersion={tickVersion}
               onBack={closeItemPage}
