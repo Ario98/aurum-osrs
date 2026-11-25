@@ -114,10 +114,15 @@ export const api = {
     );
   },
   itemDetail: (id: number) => request<ItemMetrics>(`/api/market/items/${id}`),
-  itemChart: (id: number, window: '6h' | '24h' | '7d' | '30d' | '90d' | '1y') =>
-    request<{ item_id: number; timestep: string; window?: string; source: string; points: ChartPoint[] }>(
-      `/api/market/items/${id}/chart?window=${window}`,
-    ),
+  itemChart: (id: number, window: 'live' | '6h' | '24h' | '7d' | '30d' | '90d' | '1y') =>
+    request<{
+      item_id: number;
+      timestep: string;
+      window?: string;
+      window_seconds?: number | null;
+      source: string;
+      points: ChartPoint[];
+    }>(`/api/market/items/${id}/chart?window=${window}`),
 
   // Arbitrage
   arbitrageSummary: (members: boolean) =>

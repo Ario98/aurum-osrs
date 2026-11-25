@@ -284,14 +284,47 @@ async def get_item_detail(item_id: int, request: Request) -> dict[str, Any]:
     }
 
 
+def _merge_candles(
+    local_pts: list[dict[str, Any]],
+    wiki_pts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge local SQLite candles with Wiki /timeseries without truncating history."""
+    by_ts: dict[int, dict[str, Any]] = {}
+    for p in local_pts:
+        ts = int(p.get("timestamp", 0))
+        if ts <= 0:
+            continue
+        if p.get("avgHighPrice") is None and p.get("avgLowPrice") is None:
+            continue
+        by_ts[ts] = p
+    for p in wiki_pts:
+        ts = int(p.get("timestamp", 0))
+        if ts <= 0:
+            continue
+        if p.get("avgHighPrice") is None and p.get("avgLowPrice") is None:
+            continue
+        by_ts[ts] = {
+            "timestamp": ts,
+            "avgHighPrice": int(p["avgHighPrice"]) if p.get("avgHighPrice") is not None else None,
+            "avgLowPrice": int(p["avgLowPrice"]) if p.get("avgLowPrice") is not None else None,
+            "highPriceVolume": int(p.get("highPriceVolume") or 0),
+            "lowPriceVolume": int(p.get("lowPriceVolume") or 0),
+        }
+    return [by_ts[ts] for ts in sorted(by_ts.keys())]
+
+
 @router.get("/items/{item_id}/chart")
 async def get_item_chart(
     item_id: int,
     request: Request,
     timestep: str = Query(default="5m", pattern="^(5m|1h|6h|24h)$"),
-    window: Optional[str] = Query(default=None, pattern="^(6h|24h|7d|30d|90d|1y)$"),
+    window: Optional[str] = Query(default=None, pattern="^(live|6h|24h|7d|30d|90d|1y)$"),
 ) -> dict[str, Any]:
-    """Fetch exact trading-window chart candles (6h/24h/7d/30d/90d/1y) via local SQLite + Wiki /timeseries."""
+    """Fetch continuous full-resolution chart candles (live/24h/7d/30d/90d/1y) via SQLite + Wiki /timeseries.
+
+    Returns the full continuous history available at the window's resolution (never hard-truncated to
+    the initial viewport) so users can pan left smoothly without hitting an artificial cutoff.
+    """
     state = request.app.state.market_state
     wiki = request.app.state.wiki_client
     db = request.app.state.db
@@ -302,6 +335,7 @@ async def get_item_chart(
 
     now = int(time.time())
     window_cfg: dict[str, tuple[str, int]] = {
+        "live": ("5m", 6 * 3600),
         "6h": ("5m", 6 * 3600),
         "24h": ("5m", 24 * 3600),
         "7d": ("1h", 7 * 86400),
@@ -311,65 +345,69 @@ async def get_item_chart(
     }
 
     eff_step = window_cfg[window][0] if window else timestep
-    cutoff_sec = window_cfg[window][1] if window else None
+    window_sec = window_cfg[window][1] if window else None
 
-    # Serve 30D directly from local SQLite candles_1h (full 720 hourly candles in ~2ms!)
-    if window == "30d":
-        since_ts = now - 30 * 86400
+    async def _fetch_wiki_step(step: str) -> tuple[list[dict[str, Any]], str]:
+        cache_key = (item_id, step)
+        cached = state.timeseries_cache.get(cache_key)
+        now_f = time.time()
+        ttl = 90 if step == "5m" else settings.timeseries_cache_ttl_seconds
+        if cached and (now_f - cached[0]) < ttl:
+            return cached[1], "cache"
+        pts = await wiki.fetch_timeseries(item_id=item_id, timestep=step)
+        state.timeseries_cache[cache_key] = (now_f, pts)
+        return pts, "wiki_timeseries"
+
+    async def _load_sqlite(table: str, max_days: int) -> list[dict[str, Any]]:
+        since_ts = now - max_days * 86400
         async with db.conn.execute(
-            """
+            f"""
             SELECT ts, avg_high, avg_low, high_vol, low_vol
-            FROM candles_1h
+            FROM {table}
             WHERE item_id = ? AND ts >= ?
             ORDER BY ts ASC
             """,
             (item_id, since_ts),
         ) as cur:
             rows = await cur.fetchall()
-        if len(rows) >= 48:
-            local_pts = [
-                {
-                    "timestamp": int(r["ts"]),
-                    "avgHighPrice": int(r["avg_high"]) if r["avg_high"] is not None else None,
-                    "avgLowPrice": int(r["avg_low"]) if r["avg_low"] is not None else None,
-                    "highPriceVolume": int(r["high_vol"] or 0),
-                    "lowPriceVolume": int(r["low_vol"] or 0),
-                }
-                for r in rows
-            ]
-            return {
-                "item_id": item_id,
-                "timestep": "1h",
-                "window": "30d",
-                "source": "sqlite_1h",
-                "points": local_pts,
+        return [
+            {
+                "timestamp": int(r["ts"]),
+                "avgHighPrice": int(r["avg_high"]) if r["avg_high"] is not None else None,
+                "avgLowPrice": int(r["avg_low"]) if r["avg_low"] is not None else None,
+                "highPriceVolume": int(r["high_vol"] or 0),
+                "lowPriceVolume": int(r["low_vol"] or 0),
             }
-        # Fallback if fresh install hasn't backfilled 30d yet
-        eff_step = "6h"
+            for r in rows
+        ]
 
-    cache_key = (item_id, eff_step)
-    cached = state.timeseries_cache.get(cache_key)
-    now_f = time.time()
-    ttl = 120 if eff_step == "5m" else settings.timeseries_cache_ttl_seconds
+    local_pts: list[dict[str, Any]] = []
+    if eff_step == "5m":
+        local_pts = await _load_sqlite("candles_5m", max(14, settings.retention_5m_days))
+    elif eff_step == "1h":
+        local_pts = await _load_sqlite("candles_1h", max(90, settings.retention_1h_days))
+    elif eff_step == "24h":
+        local_pts = await _load_sqlite("candles_24h", 366)
 
-    if cached and (now_f - cached[0]) < ttl:
-        points = cached[1]
-        source = "cache"
-    else:
-        points = await wiki.fetch_timeseries(item_id=item_id, timestep=eff_step)
-        state.timeseries_cache[cache_key] = (now_f, points)
-        source = "wiki_timeseries"
+    wiki_pts, wiki_src = await _fetch_wiki_step(eff_step)
+    points = _merge_candles(local_pts, wiki_pts)
 
-    if cutoff_sec is not None and points:
-        min_ts = now - cutoff_sec
-        sliced = [p for p in points if int(p.get("timestamp", 0)) >= min_ts]
-        if len(sliced) >= 2:
-            points = sliced
+    # Fallback for fresh installs without 30d local 1h history yet: ensure 30d has >= 30d span via 6h
+    if window == "30d" and points:
+        span_sec = points[-1]["timestamp"] - points[0]["timestamp"]
+        if span_sec < 20 * 86400:
+            wiki_6h, wiki_src = await _fetch_wiki_step("6h")
+            if wiki_6h:
+                points = _merge_candles([], wiki_6h)
+                eff_step = "6h"
+
+    source = f"sqlite+{wiki_src}" if local_pts else wiki_src
 
     return {
         "item_id": item_id,
         "timestep": eff_step,
         "window": window,
+        "window_seconds": window_sec,
         "source": source,
         "points": points,
     }

@@ -32,17 +32,34 @@ interface Props {
   onToggleStar: (item: { id: number; name: string; low?: number | null }) => Promise<void>;
 }
 
-type ChartWindow = '6h' | '24h' | '7d' | '30d' | '90d' | '1y';
+type ChartWindow = 'live' | '24h' | '7d' | '30d' | '90d' | '1y';
 type LowerPaneMode = 'volume_cvd' | 'ofi_wave';
 
-const TIMEFRAMES: { key: ChartWindow; label: string; hint: string }[] = [
-  { key: '6h', label: '6H', hint: '6 hours (5m candles)' },
-  { key: '24h', label: '24H', hint: '24 hours (5m candles)' },
-  { key: '7d', label: '7D', hint: '7 days (1h candles)' },
-  { key: '30d', label: '30D', hint: '30 days (1h candles)' },
-  { key: '90d', label: '90D', hint: '90 days (6h candles)' },
-  { key: '1y', label: '1Y', hint: '1 year (24h candles)' },
+const TIMEFRAMES: { key: ChartWindow; label: string; hint: string; windowSec: number; step: '5m' | '1h' | '6h' | '24h' }[] = [
+  { key: 'live', label: 'LIVE', hint: 'Live 6h view (5m candles) — scroll left for continuous history', windowSec: 6 * 3600, step: '5m' },
+  { key: '24h', label: '24H', hint: '24h view (5m candles) — scroll left for deeper history', windowSec: 24 * 3600, step: '5m' },
+  { key: '7d', label: '7D', hint: '7d view (1h candles) — scroll left for deeper history', windowSec: 7 * 86400, step: '1h' },
+  { key: '30d', label: '30D', hint: '30d view (1h candles) — scroll left for deeper history', windowSec: 30 * 86400, step: '1h' },
+  { key: '90d', label: '90D', hint: '90d view (6h candles) — scroll left for 1Y history', windowSec: 90 * 86400, step: '6h' },
+  { key: '1y', label: '1Y', hint: '1 year full view (24h candles)', windowSec: 365 * 86400, step: '24h' },
 ];
+
+const WINDOW_SECONDS: Record<ChartWindow, number> = {
+  live: 6 * 3600,
+  '24h': 24 * 3600,
+  '7d': 7 * 86400,
+  '30d': 30 * 86400,
+  '90d': 90 * 86400,
+  '1y': 365 * 86400,
+};
+
+const NEXT_DEEPER_WINDOW: Partial<Record<ChartWindow, { next: ChartWindow; notice: string }>> = {
+  live: { next: '30d', notice: 'Continued into 1h history' },
+  '24h': { next: '30d', notice: 'Continued into 1h history' },
+  '7d': { next: '90d', notice: 'Continued into 6h history' },
+  '30d': { next: '90d', notice: 'Continued into 6h history' },
+  '90d': { next: '1y', notice: 'Continued into 1Y history' },
+};
 
 function formatAxisGp(val: number): string {
   const abs = Math.abs(val);
@@ -116,16 +133,23 @@ export function ItemDetail({
   const [loadingChart, setLoadingChart] = useState(false);
   const [chartReloadNonce, setChartReloadNonce] = useState(0);
 
-  // Chart overlays
+  // Chart overlays & continuous history state
   const [showAiForecast, setShowAiForecast] = useState(true);
   const [showVwapLines, setShowVwapLines] = useState(true);
   const [trimOutliers, setTrimOutliers] = useState(true);
   const [hoverPoint, setHoverPoint] = useState<ChartPoint | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [isScrolledBack, setIsScrolledBack] = useState(false);
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
 
   const chartFrameRef = useRef<HTMLDivElement | null>(null);
   const priceContainerRef = useRef<HTMLDivElement | null>(null);
   const volContainerRef = useRef<HTMLDivElement | null>(null);
+  const preserveAnchorTsRef = useRef<number | null>(null);
+  const preserveSpanSecRef = useRef<number | null>(null);
+  const lastAutoExtendRef = useRef<number>(0);
+  const resetViewFnRef = useRef<(() => void) | null>(null);
+  const silentRefreshRef = useRef<boolean>(false);
 
   const copyGp = (key: string, val: number | null | undefined) => {
     if (!val || val <= 0) return;
@@ -148,11 +172,25 @@ export function ItemDetail({
 
   // Reset timeframe & scroll top when switching items
   useEffect(() => {
+    preserveAnchorTsRef.current = null;
+    preserveSpanSecRef.current = null;
+    setIsScrolledBack(false);
+    setHistoryNotice(null);
     setChartWindow('24h');
     setItem(null);
     setLoadingItem(true);
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }, [itemId]);
+
+  // Silent 60s background refresh while in LIVE mode so fresh 5m candles roll in automatically
+  useEffect(() => {
+    if (chartWindow !== 'live') return;
+    const id = window.setInterval(() => {
+      silentRefreshRef.current = true;
+      setChartReloadNonce((n) => n + 1);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [chartWindow]);
 
   // Live 10s item telemetry refresh
   useEffect(() => {
@@ -170,10 +208,12 @@ export function ItemDetail({
     };
   }, [itemId, tickVersion]);
 
-  // Fetch chart candles
+  // Fetch continuous full-resolution chart candles
   useEffect(() => {
     let cancelled = false;
-    setLoadingChart(true);
+    const isSilent = silentRefreshRef.current;
+    silentRefreshRef.current = false;
+    if (!isSilent) setLoadingChart(true);
     api
       .itemChart(itemId, chartWindow)
       .then((res) => {
@@ -183,7 +223,7 @@ export function ItemDetail({
         }
       })
       .finally(() => {
-        if (!cancelled) setLoadingChart(false);
+        if (!cancelled && !isSilent) setLoadingChart(false);
       });
     return () => {
       cancelled = true;
@@ -258,7 +298,7 @@ export function ItemDetail({
     const useForwardCone =
       showAiForecast &&
       Boolean(ml?.target_12h_price) &&
-      (chartWindow === '6h' || chartWindow === '24h' || chartWindow === '7d');
+      (chartWindow === 'live' || chartWindow === '24h' || chartWindow === '7d');
 
     const t4 = lastTs + 4 * 3600;
     const t12 = lastTs + 12 * 3600;
@@ -269,17 +309,25 @@ export function ItemDetail({
     const bHi12 = ml?.band_high_12h || target12;
     const bLo12 = ml?.band_low_12h || target12;
 
-    const allPrices = [...highData.map((d) => d.value), ...lowData.map((d) => d.value)];
-    if (useForwardCone && target12 > 0) {
-      allPrices.push(target4, target12, bHi12, bLo12);
+    // Initial-window slice for micro-tick & VWAP reference range
+    const initFromTs = lastTs - WINDOW_SECONDS[chartWindow];
+    const recentPts = chartWindow === '1y' ? points : points.filter((p) => p.timestamp >= initFromTs);
+    const refPts = recentPts.length >= 2 ? recentPts : points;
+    const refPrices: number[] = [];
+    for (const p of refPts) {
+      if (p.avgHighPrice !== null) refPrices.push(p.avgHighPrice);
+      if (p.avgLowPrice !== null) refPrices.push(p.avgLowPrice);
     }
-    allPrices.sort((a, b) => a - b);
+    if (useForwardCone && target12 > 0) {
+      refPrices.push(target4, target12, bHi12, bLo12);
+    }
+    refPrices.sort((a, b) => a - b);
 
-    const nPrices = allPrices.length;
-    const p02 = nPrices > 0 ? allPrices[Math.floor(nPrices * 0.02)] : 0;
-    const p98 = nPrices > 0 ? allPrices[Math.min(nPrices - 1, Math.ceil(nPrices * 0.98))] : 1;
-    const rawMin = nPrices > 0 ? allPrices[0] : 0;
-    const rawMax = nPrices > 0 ? allPrices[nPrices - 1] : 1;
+    const nPrices = refPrices.length;
+    const p02 = nPrices > 0 ? refPrices[Math.floor(nPrices * 0.02)] : 0;
+    const p98 = nPrices > 0 ? refPrices[Math.min(nPrices - 1, Math.ceil(nPrices * 0.98))] : 1;
+    const rawMin = nPrices > 0 ? refPrices[0] : 0;
+    const rawMax = nPrices > 0 ? refPrices[nPrices - 1] : 1;
     const coreSpan = Math.max(0, p98 - p02);
     const isMicroTick = coreSpan <= 20;
 
@@ -289,10 +337,27 @@ export function ItemDetail({
       formatter: formatAxisGp,
     };
 
+    // Dynamic visible-range autoscaling: smoothly rescales Y-axis as user pans back through history
     const autoscaleProvider = () => {
-      if (nPrices === 0) return null;
-      const lo = trimOutliers ? p02 : rawMin;
-      const hi = trimOutliers ? p98 : rawMax;
+      if (points.length === 0) return null;
+      const vis = priceChart.timeScale().getVisibleLogicalRange();
+      const startI = vis ? Math.max(0, Math.floor(vis.from)) : 0;
+      const endI = vis ? Math.min(points.length - 1, Math.ceil(vis.to)) : points.length - 1;
+      const visPrices: number[] = [];
+      for (let i = startI; i <= endI; i++) {
+        const p = points[i];
+        if (!p) continue;
+        if (p.avgHighPrice !== null) visPrices.push(p.avgHighPrice);
+        if (p.avgLowPrice !== null) visPrices.push(p.avgLowPrice);
+      }
+      if (useForwardCone && target12 > 0 && (!vis || vis.to >= points.length - 2)) {
+        visPrices.push(target4, target12, bHi12, bLo12);
+      }
+      if (visPrices.length === 0) return null;
+      visPrices.sort((a, b) => a - b);
+      const vn = visPrices.length;
+      const lo = trimOutliers ? visPrices[Math.floor(vn * 0.02)] : visPrices[0];
+      const hi = trimOutliers ? visPrices[Math.min(vn - 1, Math.ceil(vn * 0.98))] : visPrices[vn - 1];
       const span = hi - lo;
       const pad = span <= 2 ? 1 : Math.max(1, span * 0.12);
       return {
@@ -552,22 +617,93 @@ export function ItemDetail({
       });
     }
 
-    priceChart.timeScale().fitContent();
-    volChart.timeScale().fitContent();
+    // Initial viewport zoom (shows selected window while keeping full continuous history to the left!)
+    const coneBars = useForwardCone && lastHigh > 0 && target12 > 0 ? 2 : 0;
+    const rightEdge = points.length - 1 + coneBars + 1.5;
+
+    const applyDefaultViewport = () => {
+      const winSec = WINDOW_SECONDS[chartWindow];
+      const targetFromTs = lastTs - winSec;
+      let startIdx = 0;
+      if (chartWindow !== '1y') {
+        const found = points.findIndex((p) => p.timestamp >= targetFromTs);
+        startIdx = found >= 0 ? found : 0;
+      }
+      if (points.length - startIdx < 20 && points.length > 20) {
+        startIdx = Math.max(0, points.length - 20);
+      }
+      const range = { from: startIdx, to: rightEdge };
+      priceChart.timeScale().setVisibleLogicalRange(range);
+      volChart.timeScale().setVisibleLogicalRange(range);
+      setIsScrolledBack(false);
+    };
+    resetViewFnRef.current = applyDefaultViewport;
+
+    let userReadyForExtend = false;
+    const readyTimer = window.setTimeout(() => {
+      userReadyForExtend = true;
+    }, 450);
+
+    if (preserveAnchorTsRef.current !== null && points.length > 2) {
+      const anchorTs = preserveAnchorTsRef.current;
+      const prevSpan = preserveSpanSecRef.current || WINDOW_SECONDS[chartWindow];
+      preserveAnchorTsRef.current = null;
+      preserveSpanSecRef.current = null;
+
+      let anchorIdx = points.findIndex((p) => p.timestamp >= anchorTs);
+      if (anchorIdx < 0) anchorIdx = points.length - 1;
+      const fromTs = anchorTs - Math.max(prevSpan * 1.4, 3 * 86400);
+      const toTs = anchorTs + Math.max(prevSpan * 0.6, 12 * 3600);
+      let fromIdx = points.findIndex((p) => p.timestamp >= fromTs);
+      if (fromIdx < 0) fromIdx = 0;
+      let toIdx = points.findIndex((p) => p.timestamp >= toTs);
+      if (toIdx < 0) toIdx = Math.min(points.length - 1, anchorIdx + 24);
+      if (toIdx - fromIdx < 24) {
+        fromIdx = Math.max(0, anchorIdx - 28);
+        toIdx = Math.min(rightEdge, anchorIdx + 12);
+      }
+      const range = { from: fromIdx, to: toIdx };
+      priceChart.timeScale().setVisibleLogicalRange(range);
+      volChart.timeScale().setVisibleLogicalRange(range);
+      setIsScrolledBack(toIdx < rightEdge - 4);
+    } else {
+      applyDefaultViewport();
+    }
 
     let syncingRange = false;
-    priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    const handleRangeUpdate = (
+      source: 'price' | 'vol',
+      range: { from: number; to: number } | null,
+    ) => {
       if (syncingRange || !range) return;
       syncingRange = true;
-      volChart.timeScale().setVisibleLogicalRange(range);
+      if (source === 'price') {
+        volChart.timeScale().setVisibleLogicalRange(range);
+      } else {
+        priceChart.timeScale().setVisibleLogicalRange(range);
+      }
       syncingRange = false;
-    });
-    volChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (syncingRange || !range) return;
-      syncingRange = true;
-      priceChart.timeScale().setVisibleLogicalRange(range);
-      syncingRange = false;
-    });
+
+      setIsScrolledBack(range.to < rightEdge - 4);
+
+      // Seamless infinite-scroll continuation when user drags past the oldest candle of current resolution
+      if (userReadyForExtend && range.from < -1.5 && points.length > 10) {
+        const nextSpec = NEXT_DEEPER_WINDOW[chartWindow];
+        const nowMs = Date.now();
+        if (nextSpec && nowMs - lastAutoExtendRef.current > 1500) {
+          lastAutoExtendRef.current = nowMs;
+          preserveAnchorTsRef.current = points[0].timestamp;
+          const rightIdx = Math.min(points.length - 1, Math.max(1, Math.round(range.to)));
+          preserveSpanSecRef.current = Math.max(3600, points[rightIdx].timestamp - points[0].timestamp);
+          setHistoryNotice(nextSpec.notice);
+          window.setTimeout(() => setHistoryNotice(null), 3200);
+          setChartWindow(nextSpec.next);
+        }
+      }
+    };
+
+    priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => handleRangeUpdate('price', range));
+    volChart.timeScale().subscribeVisibleLogicalRangeChange((range) => handleRangeUpdate('vol', range));
 
     const handleCrosshair = (param: { time?: unknown }) => {
       if (typeof param.time === 'number') {
@@ -592,6 +728,7 @@ export function ItemDetail({
     window.addEventListener('resize', resizeCharts);
 
     return () => {
+      window.clearTimeout(readyTimer);
       ro.disconnect();
       window.removeEventListener('resize', resizeCharts);
       priceChart.remove();
@@ -820,21 +957,60 @@ export function ItemDetail({
           {/* Left: Timeframes + Glowing Overlay Pills */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center rounded-lg border border-white/[0.08] bg-[#060609] p-0.5">
-              {TIMEFRAMES.map((tf) => (
-                <button
-                  key={tf.key}
-                  onClick={() => setChartWindow(tf.key)}
-                  title={tf.hint}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                    chartWindow === tf.key
-                      ? 'bg-zinc-100 text-zinc-950 shadow-xs'
-                      : 'text-zinc-400 hover:text-zinc-100'
-                  }`}
-                >
-                  {tf.label}
-                </button>
-              ))}
+              {TIMEFRAMES.map((tf) => {
+                const active = chartWindow === tf.key;
+                const isLive = tf.key === 'live';
+                return (
+                  <button
+                    key={tf.key}
+                    onClick={() => {
+                      preserveAnchorTsRef.current = null;
+                      preserveSpanSecRef.current = null;
+                      setHistoryNotice(null);
+                      if (chartWindow === tf.key) {
+                        resetViewFnRef.current?.();
+                      } else {
+                        setChartWindow(tf.key);
+                      }
+                    }}
+                    title={tf.hint}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                      active
+                        ? isLive
+                          ? 'bg-emerald-400 text-zinc-950 shadow-xs'
+                          : 'bg-zinc-100 text-zinc-950 shadow-xs'
+                        : 'text-zinc-400 hover:text-zinc-100'
+                    }`}
+                  >
+                    {isLive && (
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          active ? 'bg-zinc-950 animate-pulse' : 'bg-emerald-400 animate-pulse'
+                        }`}
+                      />
+                    )}
+                    {tf.label}
+                  </button>
+                );
+              })}
             </div>
+
+            {isScrolledBack && (
+              <button
+                type="button"
+                onClick={() => resetViewFnRef.current?.()}
+                className="flex items-center gap-1 rounded-lg border border-emerald-500/35 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 transition hover:bg-emerald-500/20"
+                title="Jump back to the latest live edge"
+              >
+                Latest ▸
+              </button>
+            )}
+
+            {historyNotice && (
+              <span className="rounded-lg border border-sky-400/30 bg-sky-500/12 px-2.5 py-1 text-[11px] font-medium text-sky-200">
+                {historyNotice}
+              </span>
+            )}
 
             {item?.ml && (
               <button
